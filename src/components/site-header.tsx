@@ -76,9 +76,7 @@ export function SiteHeader() {
                 <Link to="/auth">{t("nav.login")}</Link>
               </Button>
               <Button asChild size="sm">
-                <Link to="/auth" search={{ mode: "register" }}>
-                  {t("nav.register")}
-                </Link>
+                <Link to="/auth">{t("nav.register")}</Link>
               </Button>
             </div>
           )}
