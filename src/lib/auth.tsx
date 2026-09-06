@@ -11,14 +11,18 @@ import { createContext, useContext, useEffect, useMemo, useState, useCallback } 
 
 import { getUserProfile, saveUserProfile } from "./db";
 import { firebaseReady, getFirebaseAuth } from "./firebase";
+import { mutate, readDb, uid } from "./local-store";
 import { OWNER_EMAIL, type UserProfile } from "./types";
 
+type AuthUser = { uid: string; email: string | null; displayName: string | null };
+
 type AuthCtx = {
-  user: User | null;
+  user: AuthUser | null;
   profile: UserProfile | null;
   loading: boolean;
   isOwner: boolean;
   isStaff: boolean;
+  localMode: boolean;
   register: (input: {
     fullName: string;
     email: string;
@@ -34,14 +38,30 @@ type AuthCtx = {
 
 const Ctx = createContext<AuthCtx | null>(null);
 
+const SESSION_KEY = "oa.session";
+const PW_KEY = "oa.pw";
+
+function readPw(): Record<string, string> {
+  try {
+    return JSON.parse(window.localStorage.getItem(PW_KEY) ?? "{}") as Record<string, string>;
+  } catch {
+    return {};
+  }
+}
+
+function isOwnerEmail(email: string) {
+  return email.trim().toLowerCase() === OWNER_EMAIL.toLowerCase();
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<AuthUser | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const localMode = !firebaseReady;
 
-  const loadProfile = useCallback(async (u: User) => {
+  const loadProfile = useCallback(async (u: AuthUser) => {
     let p = await getUserProfile(u.uid);
-    const shouldBeOwner = (u.email ?? "").toLowerCase() === OWNER_EMAIL.toLowerCase();
+    const shouldBeOwner = isOwnerEmail(u.email ?? "");
     if (!p) {
       p = {
         id: u.uid,
@@ -60,15 +80,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    if (!firebaseReady) {
+    if (localMode) {
+      try {
+        const id = window.localStorage.getItem(SESSION_KEY);
+        const p = id ? (readDb().users.find((u) => u.id === id) ?? null) : null;
+        if (p) {
+          setUser({ uid: p.id, email: p.email, displayName: p.fullName });
+          setProfile(p);
+        }
+      } catch {
+        /* ignore */
+      }
       setLoading(false);
       return;
     }
-    const unsub = onAuthStateChanged(getFirebaseAuth(), async (u) => {
-      setUser(u);
+    const unsub = onAuthStateChanged(getFirebaseAuth(), async (u: User | null) => {
+      setUser(u ? { uid: u.uid, email: u.email, displayName: u.displayName } : null);
       if (u) {
         try {
-          await loadProfile(u);
+          await loadProfile({ uid: u.uid, email: u.email, displayName: u.displayName });
         } catch (err) {
           console.error(err);
         }
@@ -78,53 +108,108 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setLoading(false);
     });
     return unsub;
-  }, [loadProfile]);
+  }, [loadProfile, localMode]);
 
-  const register: AuthCtx["register"] = useCallback(async (input) => {
-    const cred = await createUserWithEmailAndPassword(
-      getFirebaseAuth(),
-      input.email.trim(),
-      input.password,
-    );
-    await updateProfile(cred.user, { displayName: input.fullName });
-    const isOwnerEmail = input.email.trim().toLowerCase() === OWNER_EMAIL.toLowerCase();
-    const p: UserProfile = {
-      id: cred.user.uid,
-      fullName: input.fullName,
-      email: input.email.trim(),
-      ...(input.phone ? { phone: input.phone } : {}),
-      role: isOwnerEmail ? "owner" : "student",
-      enrolledCourseIds: input.courseId ? [input.courseId] : [],
-      createdAt: Date.now(),
-    };
-    await saveUserProfile(p);
-    setProfile(p);
-  }, []);
+  const register: AuthCtx["register"] = useCallback(
+    async (input) => {
+      const email = input.email.trim();
+      if (localMode) {
+        const existing = readDb().users.find(
+          (u) => u.email.toLowerCase() === email.toLowerCase(),
+        );
+        if (existing) throw { code: "auth/email-already-in-use" };
+        if (input.password.length < 6) throw { code: "auth/weak-password" };
+        const p: UserProfile = {
+          id: uid("u"),
+          fullName: input.fullName,
+          email,
+          ...(input.phone ? { phone: input.phone } : {}),
+          role: isOwnerEmail(email) ? "owner" : "student",
+          enrolledCourseIds: input.courseId ? [input.courseId] : [],
+          createdAt: Date.now(),
+        };
+        mutate((db) => {
+          db.users = [...db.users, p];
+        });
+        const pw = readPw();
+        pw[p.id] = input.password;
+        window.localStorage.setItem(PW_KEY, JSON.stringify(pw));
+        window.localStorage.setItem(SESSION_KEY, p.id);
+        setUser({ uid: p.id, email: p.email, displayName: p.fullName });
+        setProfile(p);
+        return;
+      }
+      const cred = await createUserWithEmailAndPassword(getFirebaseAuth(), email, input.password);
+      await updateProfile(cred.user, { displayName: input.fullName });
+      const p: UserProfile = {
+        id: cred.user.uid,
+        fullName: input.fullName,
+        email,
+        ...(input.phone ? { phone: input.phone } : {}),
+        role: isOwnerEmail(email) ? "owner" : "student",
+        enrolledCourseIds: input.courseId ? [input.courseId] : [],
+        createdAt: Date.now(),
+      };
+      await saveUserProfile(p);
+      setProfile(p);
+    },
+    [localMode],
+  );
 
-  const login: AuthCtx["login"] = useCallback(async (email, password) => {
-    await signInWithEmailAndPassword(getFirebaseAuth(), email.trim(), password);
-  }, []);
+  const login: AuthCtx["login"] = useCallback(
+    async (email, password) => {
+      if (localMode) {
+        const p = readDb().users.find(
+          (u) => u.email.toLowerCase() === email.trim().toLowerCase(),
+        );
+        const pw = readPw();
+        if (!p || pw[p.id] !== password) throw { code: "auth/invalid-credential" };
+        window.localStorage.setItem(SESSION_KEY, p.id);
+        setUser({ uid: p.id, email: p.email, displayName: p.fullName });
+        setProfile(p);
+        return;
+      }
+      await signInWithEmailAndPassword(getFirebaseAuth(), email.trim(), password);
+    },
+    [localMode],
+  );
 
   const logout = useCallback(async () => {
+    if (localMode) {
+      window.localStorage.removeItem(SESSION_KEY);
+      setUser(null);
+      setProfile(null);
+      return;
+    }
     await signOut(getFirebaseAuth());
     setProfile(null);
-  }, []);
+  }, [localMode]);
 
-  const resetPassword = useCallback(async (email: string) => {
-    await sendPasswordResetEmail(getFirebaseAuth(), email.trim(), {
-      url: `${window.location.origin}/auth`,
-    });
-  }, []);
+  const resetPassword = useCallback(
+    async (email: string) => {
+      if (localMode) return;
+      await sendPasswordResetEmail(getFirebaseAuth(), email.trim(), {
+        url: `${window.location.origin}/auth`,
+      });
+    },
+    [localMode],
+  );
 
   const refreshProfile = useCallback(async () => {
-    if (user) await loadProfile(user);
-  }, [user, loadProfile]);
+    if (!user) return;
+    if (localMode) {
+      setProfile(readDb().users.find((u) => u.id === user.uid) ?? null);
+      return;
+    }
+    await loadProfile(user);
+  }, [user, loadProfile, localMode]);
 
   const value = useMemo<AuthCtx>(
     () => ({
       user,
       profile,
       loading,
+      localMode,
       isOwner: profile?.role === "owner",
       isStaff: profile?.role === "owner" || profile?.role === "instructor",
       register,
@@ -133,7 +218,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       resetPassword,
       refreshProfile,
     }),
-    [user, profile, loading, register, login, logout, resetPassword, refreshProfile],
+    [user, profile, loading, localMode, register, login, logout, resetPassword, refreshProfile],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
@@ -145,7 +230,9 @@ export function useAuth() {
   return ctx;
 }
 
-export function authErrorKey(err: unknown): "auth.invalidCredentials" | "auth.emailInUse" | "auth.weakPassword" | "common.error" {
+export function authErrorKey(
+  err: unknown,
+): "auth.invalidCredentials" | "auth.emailInUse" | "auth.weakPassword" | "common.error" {
   const code = (err as { code?: string })?.code ?? "";
   if (code.includes("email-already-in-use")) return "auth.emailInUse";
   if (code.includes("weak-password")) return "auth.weakPassword";
