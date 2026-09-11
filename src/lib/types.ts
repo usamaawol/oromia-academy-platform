@@ -5,6 +5,7 @@ export type UserProfile = {
   fullName: string;
   email: string;
   phone?: string;
+  department?: string;
   role: Role;
   enrolledCourseIds: string[];
   progress?: Record<string, number>;
