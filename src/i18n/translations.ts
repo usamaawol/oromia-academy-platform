@@ -284,6 +284,19 @@ export const om = {
   "pwa.install": "Appii Buufadhu",
   "pwa.installBody": "Oromia Academy bilbila kee irratti buufadhu.",
   "setup.needed": "Firebase qindaa'inni hin xumuramne. Admin qunnami.",
+
+  // google / department
+  "auth.google": "Google'n Seeni",
+  "auth.googleUnavailable": "Google'n seenuun amma hin danda'amu — imeelii fi jecha icciitiitiin seeni.",
+  "auth.googlePopupClosed": "Foddaan Google cufameera. Irra deebi'ii yaali.",
+  "auth.or": "ykn",
+  "auth.department": "Damee",
+  "auth.selectDepartment": "Damee Filadhu",
+  "auth.departmentRequired": "Maaloo damee kee filadhu.",
+  "auth.emailNote": "Maqaa, imeelii fi damee kee galchi.",
+  "dash.completeProfile": "Piroofaayilii kee xumuri",
+  "dash.completeProfileBody": "Damee ati barachuu barbaaddu filadhu.",
+  "dash.department": "Damee",
 } as const;
 
 export type TranslationKey = keyof typeof om;
