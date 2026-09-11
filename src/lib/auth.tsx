@@ -181,6 +181,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [localMode],
   );
 
+  const loginWithGoogle: AuthCtx["loginWithGoogle"] = useCallback(async () => {
+    if (localMode) throw { code: "auth/google-unavailable" };
+    const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: "select_account" });
+    await signInWithPopup(getFirebaseAuth(), provider);
+  }, [localMode]);
+
   const logout = useCallback(async () => {
     if (localMode) {
       window.localStorage.removeItem(SESSION_KEY);
