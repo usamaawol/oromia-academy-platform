@@ -218,6 +218,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await loadProfile(user);
   }, [user, loadProfile, localMode]);
 
+  const updateDepartment: AuthCtx["updateDepartment"] = useCallback(
+    async (department: string) => {
+      if (!profile) return;
+      const next: UserProfile = { ...profile, department };
+      if (localMode) {
+        mutate((db) => {
+          db.users = db.users.map((u) => (u.id === next.id ? next : u));
+        });
+      } else {
+        await saveUserProfile(next);
+      }
+      setProfile(next);
+    },
+    [profile, localMode],
+  );
+
   const value = useMemo<AuthCtx>(
     () => ({
       user,
@@ -228,11 +244,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       isStaff: profile?.role === "owner" || profile?.role === "instructor",
       register,
       login,
+      loginWithGoogle,
       logout,
       resetPassword,
       refreshProfile,
+      updateDepartment,
     }),
-    [user, profile, loading, localMode, register, login, logout, resetPassword, refreshProfile],
+    [
+      user,
+      profile,
+      loading,
+      localMode,
+      register,
+      login,
+      loginWithGoogle,
+      logout,
+      resetPassword,
+      refreshProfile,
+      updateDepartment,
+    ],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
