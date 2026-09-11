@@ -276,8 +276,18 @@ export function useAuth() {
 
 export function authErrorKey(
   err: unknown,
-): "auth.invalidCredentials" | "auth.emailInUse" | "auth.weakPassword" | "common.error" {
+):
+  | "auth.invalidCredentials"
+  | "auth.emailInUse"
+  | "auth.weakPassword"
+  | "auth.googleUnavailable"
+  | "auth.googlePopupClosed"
+  | "common.error" {
   const code = (err as { code?: string })?.code ?? "";
+  if (code.includes("google-unavailable") || code.includes("operation-not-allowed"))
+    return "auth.googleUnavailable";
+  if (code.includes("popup-closed") || code.includes("cancelled-popup"))
+    return "auth.googlePopupClosed";
   if (code.includes("email-already-in-use")) return "auth.emailInUse";
   if (code.includes("weak-password")) return "auth.weakPassword";
   if (
