@@ -30,12 +30,15 @@ type AuthCtx = {
     email: string;
     password: string;
     phone?: string;
+    department?: string;
     courseId?: string;
   }) => Promise<void>;
   login: (email: string, password: string) => Promise<void>;
+  loginWithGoogle: () => Promise<void>;
   logout: () => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
   refreshProfile: () => Promise<void>;
+  updateDepartment: (department: string) => Promise<void>;
 };
 
 const Ctx = createContext<AuthCtx | null>(null);
