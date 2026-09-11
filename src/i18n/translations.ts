@@ -284,6 +284,19 @@ export const om = {
   "pwa.install": "Appii Buufadhu",
   "pwa.installBody": "Oromia Academy bilbila kee irratti buufadhu.",
   "setup.needed": "Firebase qindaa'inni hin xumuramne. Admin qunnami.",
+
+  // google / department
+  "auth.google": "Google'n Seeni",
+  "auth.googleUnavailable": "Google'n seenuun amma hin danda'amu — imeelii fi jecha icciitiitiin seeni.",
+  "auth.googlePopupClosed": "Foddaan Google cufameera. Irra deebi'ii yaali.",
+  "auth.or": "ykn",
+  "auth.department": "Damee",
+  "auth.selectDepartment": "Damee Filadhu",
+  "auth.departmentRequired": "Maaloo damee kee filadhu.",
+  "auth.emailNote": "Maqaa, imeelii fi damee kee galchi.",
+  "dash.completeProfile": "Piroofaayilii kee xumuri",
+  "dash.completeProfileBody": "Damee ati barachuu barbaaddu filadhu.",
+  "dash.department": "Damee",
 } as const;
 
 export type TranslationKey = keyof typeof om;
@@ -563,6 +576,18 @@ export const en: Record<TranslationKey, string> = {
   "pwa.install": "Install app",
   "pwa.installBody": "Install Oromia Academy on your phone.",
   "setup.needed": "Firebase setup is incomplete. Contact the admin.",
+
+  "auth.google": "Continue with Google",
+  "auth.googleUnavailable": "Google sign-in isn't available yet — use email and password.",
+  "auth.googlePopupClosed": "The Google window was closed. Please try again.",
+  "auth.or": "or",
+  "auth.department": "Department",
+  "auth.selectDepartment": "Select your department",
+  "auth.departmentRequired": "Please choose your department.",
+  "auth.emailNote": "Enter your name, email and department.",
+  "dash.completeProfile": "Complete your profile",
+  "dash.completeProfileBody": "Choose the department you want to study.",
+  "dash.department": "Department",
 };
 
 export const dictionaries = { om, en } as const;

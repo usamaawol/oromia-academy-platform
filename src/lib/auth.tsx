@@ -1,8 +1,10 @@
 import {
+  GoogleAuthProvider,
   createUserWithEmailAndPassword,
   onAuthStateChanged,
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
+  signInWithPopup,
   signOut,
   updateProfile,
   type User,
@@ -28,12 +30,15 @@ type AuthCtx = {
     email: string;
     password: string;
     phone?: string;
+    department?: string;
     courseId?: string;
   }) => Promise<void>;
   login: (email: string, password: string) => Promise<void>;
+  loginWithGoogle: () => Promise<void>;
   logout: () => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
   refreshProfile: () => Promise<void>;
+  updateDepartment: (department: string) => Promise<void>;
 };
 
 const Ctx = createContext<AuthCtx | null>(null);
@@ -124,6 +129,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           fullName: input.fullName,
           email,
           ...(input.phone ? { phone: input.phone } : {}),
+          ...(input.department ? { department: input.department } : {}),
           role: isOwnerEmail(email) ? "owner" : "student",
           enrolledCourseIds: input.courseId ? [input.courseId] : [],
           createdAt: Date.now(),
@@ -146,6 +152,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         fullName: input.fullName,
         email,
         ...(input.phone ? { phone: input.phone } : {}),
+        ...(input.department ? { department: input.department } : {}),
         role: isOwnerEmail(email) ? "owner" : "student",
         enrolledCourseIds: input.courseId ? [input.courseId] : [],
         createdAt: Date.now(),
@@ -173,6 +180,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     },
     [localMode],
   );
+
+  const loginWithGoogle: AuthCtx["loginWithGoogle"] = useCallback(async () => {
+    if (localMode) throw { code: "auth/google-unavailable" };
+    const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: "select_account" });
+    await signInWithPopup(getFirebaseAuth(), provider);
+  }, [localMode]);
 
   const logout = useCallback(async () => {
     if (localMode) {
@@ -204,6 +218,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await loadProfile(user);
   }, [user, loadProfile, localMode]);
 
+  const updateDepartment: AuthCtx["updateDepartment"] = useCallback(
+    async (department: string) => {
+      if (!profile) return;
+      const next: UserProfile = { ...profile, department };
+      if (localMode) {
+        mutate((db) => {
+          db.users = db.users.map((u) => (u.id === next.id ? next : u));
+        });
+      } else {
+        await saveUserProfile(next);
+      }
+      setProfile(next);
+    },
+    [profile, localMode],
+  );
+
   const value = useMemo<AuthCtx>(
     () => ({
       user,
@@ -214,11 +244,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       isStaff: profile?.role === "owner" || profile?.role === "instructor",
       register,
       login,
+      loginWithGoogle,
       logout,
       resetPassword,
       refreshProfile,
+      updateDepartment,
     }),
-    [user, profile, loading, localMode, register, login, logout, resetPassword, refreshProfile],
+    [
+      user,
+      profile,
+      loading,
+      localMode,
+      register,
+      login,
+      loginWithGoogle,
+      logout,
+      resetPassword,
+      refreshProfile,
+      updateDepartment,
+    ],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
@@ -232,8 +276,18 @@ export function useAuth() {
 
 export function authErrorKey(
   err: unknown,
-): "auth.invalidCredentials" | "auth.emailInUse" | "auth.weakPassword" | "common.error" {
+):
+  | "auth.invalidCredentials"
+  | "auth.emailInUse"
+  | "auth.weakPassword"
+  | "auth.googleUnavailable"
+  | "auth.googlePopupClosed"
+  | "common.error" {
   const code = (err as { code?: string })?.code ?? "";
+  if (code.includes("google-unavailable") || code.includes("operation-not-allowed"))
+    return "auth.googleUnavailable";
+  if (code.includes("popup-closed") || code.includes("cancelled-popup"))
+    return "auth.googlePopupClosed";
   if (code.includes("email-already-in-use")) return "auth.emailInUse";
   if (code.includes("weak-password")) return "auth.weakPassword";
   if (
