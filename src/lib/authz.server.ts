@@ -1,0 +1,83 @@
+/**
+ * Server-side authentication + authorisation. Server only.
+ *
+ * Every privileged operation resolves the caller from a Firebase ID token that
+ * Google validated, then reads the role from Firestore. The browser never
+ * supplies its own role.
+ */
+import { fsCreate, fsGet, fsSet, verifyIdToken } from "./fb-admin.server";
+import { ADMIN_ROLES, STAFF_ROLES, type Profile, type Role } from "./schema";
+
+export class AppError extends Error {
+  constructor(public code: string) {
+    super(code);
+  }
+}
+
+/** Resolves the caller and guarantees a `/users/{uid}` profile exists. */
+export async function requireProfile(idToken: string): Promise<Profile> {
+  if (!idToken) throw new AppError("auth/required");
+  let verified;
+  try {
+    verified = await verifyIdToken(idToken);
+  } catch {
+    throw new AppError("auth/invalid-session");
+  }
+
+  const existing = await fsGet<Profile>("users", verified.uid);
+  if (existing) {
+    if (existing.status === "suspended") throw new AppError("auth/suspended");
+    return { ...existing, courseIds: existing.courseIds ?? [] };
+  }
+
+  // Recovery path: the auth account exists but the profile write failed
+  // earlier. Recreate it as a student — never with elevated privileges.
+  const now = Date.now();
+  const profile: Profile = {
+    id: verified.uid,
+    uid: verified.uid,
+    fullName: verified.name || verified.email.split("@")[0] || "Student",
+    email: verified.email,
+    role: "student",
+    courseIds: [],
+    status: "active",
+    createdAt: now,
+    updatedAt: now,
+  };
+  await fsSet("users", verified.uid, { ...profile });
+  return profile;
+}
+
+export async function requireRole(idToken: string, roles: Role[]): Promise<Profile> {
+  const profile = await requireProfile(idToken);
+  if (!roles.includes(profile.role)) throw new AppError("auth/forbidden");
+  return profile;
+}
+
+export function requireStaff(idToken: string): Promise<Profile> {
+  return requireRole(idToken, STAFF_ROLES);
+}
+
+export function requireAdmin(idToken: string): Promise<Profile> {
+  return requireRole(idToken, ADMIN_ROLES);
+}
+
+export async function logAudit(
+  actor: Profile,
+  action: string,
+  target?: string,
+  details?: string,
+): Promise<void> {
+  try {
+    await fsCreate("auditLogs", {
+      userId: actor.id,
+      userName: actor.fullName || actor.email,
+      action,
+      target: target ?? null,
+      details: details ?? null,
+      createdAt: Date.now(),
+    });
+  } catch {
+    /* auditing must never break the operation it records */
+  }
+}
