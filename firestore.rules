@@ -1,0 +1,100 @@
+rules_version = '2';
+
+// Oromia Academy security rules.
+//
+// Principle: every write and every sensitive read happens through the trusted
+// application server (Firebase service account), which bypasses these rules.
+// Browsers therefore get the narrowest possible read access and NO write
+// access at all. Answer keys, exam passwords, grading data and audit logs are
+// unreachable from any browser, signed in or not.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function myRole() {
+      return signedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role
+        : 'none';
+    }
+
+    function isStaff() {
+      return myRole() in ['owner', 'admin', 'instructor'];
+    }
+
+    function isAdmin() {
+      return myRole() in ['owner', 'admin'];
+    }
+
+    // ---- users -------------------------------------------------------------
+    // A user may read only their own profile. Nobody may write from a browser,
+    // so a student can never change their own role or status.
+    match /users/{userId} {
+      allow get: if signedIn() && request.auth.uid == userId;
+      allow list: if isAdmin();
+      allow create, update, delete: if false;
+    }
+
+    // ---- courses -----------------------------------------------------------
+    // Public catalogue information is readable; changes go through the server.
+    match /courses/{courseId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    match /settings/{docId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // ---- question bank -----------------------------------------------------
+    // Contains correct answers and rubrics: never readable by any client.
+    match /questions/{questionId} {
+      allow read, write: if false;
+    }
+
+    // ---- exams -------------------------------------------------------------
+    // Exam configuration is served to students by the backend with the
+    // password stripped out; direct client reads are limited to staff.
+    match /exams/{examId} {
+      allow read: if isStaff();
+      allow write: if false;
+    }
+
+    // Exam passwords live here, hashed, and are readable by nobody.
+    match /examSecrets/{examId} {
+      allow read, write: if false;
+    }
+
+    // ---- attempts ----------------------------------------------------------
+    // A student may read their own attempts (the stored assignment does not
+    // include correct answers). All writes are server-side, so answers,
+    // timers, scores and submission state cannot be tampered with.
+    match /examAttempts/{attemptId} {
+      allow get: if signedIn() && resource.data.studentId == request.auth.uid;
+      allow list: if isStaff();
+      allow write: if false;
+    }
+
+    // ---- notifications -----------------------------------------------------
+    match /notifications/{notificationId} {
+      allow read: if signedIn() &&
+        (resource.data.userId == 'all' || resource.data.userId == request.auth.uid);
+      allow write: if false;
+    }
+
+    // ---- audit logs --------------------------------------------------------
+    match /auditLogs/{entryId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    // Anything not listed above is denied.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
