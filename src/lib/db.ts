@@ -61,6 +61,10 @@ export async function listUsers(): Promise<UserProfile[]> {
   return snap.docs.map((d) => withId<UserProfile>(d.id, d.data()));
 }
 
+export async function deleteUserProfile(id: string): Promise<void> {
+  await deleteDoc(doc(col.users(), id));
+}
+
 /* ---------------- courses ---------------- */
 
 export async function listCourses(): Promise<Course[]> {
@@ -161,6 +165,10 @@ export async function createAttempt(attempt: Omit<Attempt, "id">): Promise<strin
 
 export async function updateAttempt(id: string, patch: Partial<Attempt>): Promise<void> {
   await updateDoc(doc(col.attempts(), id), patch as Record<string, unknown>);
+}
+
+export async function deleteAttempt(id: string): Promise<void> {
+  await deleteDoc(doc(col.attempts(), id));
 }
 
 export function watchAttempt(id: string, cb: (a: Attempt | null) => void) {

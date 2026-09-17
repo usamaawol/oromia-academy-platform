@@ -100,15 +100,22 @@ export function autoGrade(
   return { autoScore, totalPoints, correctCount, wrongCount, unansweredCount, needsManualGrading };
 }
 
-export function finalizeScores(attempt: Attempt): {
+export function finalizeScores(
+  attempt: Attempt,
+  passMark: number,
+): {
   percentage: number;
   passed: boolean;
   total: number;
+  manualScore: number;
 } {
-  const manual = Object.values(attempt.manualGrades ?? {}).reduce((s, g) => s + (g.points || 0), 0);
-  const total = attempt.autoScore + manual;
+  const manualScore = Object.values(attempt.manualGrades ?? {}).reduce(
+    (s, g) => s + (g.points || 0),
+    0,
+  );
+  const total = attempt.autoScore + manualScore;
   const percentage = attempt.totalPoints > 0 ? Math.round((total / attempt.totalPoints) * 100) : 0;
-  return { percentage, passed: percentage >= 0, total };
+  return { percentage, passed: percentage >= passMark, total, manualScore };
 }
 
 export function examWindowState(exam: Exam, now: number): "before" | "open" | "after" {
@@ -145,9 +152,15 @@ export function validateExam(exam: Exam, questions: Question[]): ValidationIssue
   const selected = questions.filter((q) => exam.questionIds.includes(q.id));
   for (const q of selected) {
     if (q.type === "mcq" && !q.correctOptionId)
-      issues.push({ level: "error", message: `MCQ "${q.text.slice(0, 40)}" has no correct answer.` });
+      issues.push({
+        level: "error",
+        message: `MCQ "${q.text.slice(0, 40)}" has no correct answer.`,
+      });
     if (q.type === "mcq" && q.options.length < 2)
-      issues.push({ level: "error", message: `MCQ "${q.text.slice(0, 40)}" needs at least 2 options.` });
+      issues.push({
+        level: "error",
+        message: `MCQ "${q.text.slice(0, 40)}" needs at least 2 options.`,
+      });
     if (!q.approved)
       issues.push({
         level: "warning",
