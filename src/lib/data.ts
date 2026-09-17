@@ -8,6 +8,7 @@ import { mutate, readDb, uid } from "./local-store";
 import type {
   AcademySettings,
   Attempt,
+  AuditEntry,
   Course,
   Exam,
   AppNotification,
@@ -54,6 +55,13 @@ export async function listQuestions(courseId?: string): Promise<Question[]> {
   }
   return fdb.listQuestions(courseId);
 }
+export async function getQuestionsByIds(ids: string[]): Promise<Question[]> {
+  if (usingLocal) {
+    const byId = new Map(readDb().questions.map((q) => [q.id, q]));
+    return ids.map((id) => byId.get(id)).filter((q): q is Question => q !== undefined);
+  }
+  return fdb.getQuestionsByIds(ids);
+}
 export async function saveQuestion(q: Question): Promise<void> {
   if (usingLocal) {
     mutate((db) => {
@@ -77,7 +85,8 @@ export async function deleteQuestion(id: string): Promise<void> {
 
 /* exams */
 export async function listExams(): Promise<Exam[]> {
-  if (usingLocal) return [...readDb().exams].sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
+  if (usingLocal)
+    return [...readDb().exams].sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
   return fdb.listExams();
 }
 export async function getExam(id: string): Promise<Exam | null> {
@@ -115,6 +124,19 @@ export async function listAttemptsForStudent(studentId: string): Promise<Attempt
       .attempts.filter((a) => a.studentId === studentId)
       .sort((a, b) => b.startedAt - a.startedAt);
   return fdb.listAttemptsForStudent(studentId);
+}
+export async function listAttemptsForExam(examId: string): Promise<Attempt[]> {
+  if (usingLocal) return readDb().attempts.filter((a) => a.examId === examId);
+  return fdb.listAttemptsForExam(examId);
+}
+export async function deleteAttempt(id: string): Promise<void> {
+  if (usingLocal) {
+    mutate((db) => {
+      db.attempts = db.attempts.filter((a) => a.id !== id);
+    });
+    return;
+  }
+  await fdb.deleteAttempt(id);
 }
 export async function getAttempt(id: string): Promise<Attempt | null> {
   if (usingLocal) return readDb().attempts.find((a) => a.id === id) ?? null;
@@ -161,6 +183,16 @@ export async function saveUser(p: UserProfile): Promise<void> {
   await fdb.saveUserProfile(p);
 }
 
+export async function deleteUser(id: string): Promise<void> {
+  if (usingLocal) {
+    mutate((db) => {
+      db.users = db.users.filter((u) => u.id !== id);
+    });
+    return;
+  }
+  await fdb.deleteUserProfile(id);
+}
+
 /* notifications */
 export async function listNotifications(userId: string): Promise<AppNotification[]> {
   if (usingLocal)
@@ -168,6 +200,31 @@ export async function listNotifications(userId: string): Promise<AppNotification
       .notifications.filter((n) => n.userId === "all" || n.userId === userId)
       .sort((a, b) => b.createdAt - a.createdAt);
   return fdb.listNotifications(userId);
+}
+
+export async function pushNotification(n: Omit<AppNotification, "id">): Promise<void> {
+  if (usingLocal) {
+    mutate((db) => {
+      db.notifications = [...db.notifications, { ...n, id: uid("n") }];
+    });
+    return;
+  }
+  await fdb.pushNotification(n);
+}
+
+/* audit */
+export async function logAudit(entry: Omit<AuditEntry, "id">): Promise<void> {
+  if (usingLocal) {
+    mutate((db) => {
+      db.audit = [{ ...entry, id: uid("a") }, ...db.audit].slice(0, 200);
+    });
+    return;
+  }
+  await fdb.logAudit(entry);
+}
+export async function listAudit(): Promise<AuditEntry[]> {
+  if (usingLocal) return [...readDb().audit].sort((a, b) => b.createdAt - a.createdAt);
+  return fdb.listAudit();
 }
 
 /* settings */

@@ -53,11 +53,7 @@ export function useI18n() {
 }
 
 /** Pick the right side of a bilingual field. */
-export function localized(
-  lang: Lang,
-  om?: string | null,
-  en?: string | null,
-): string {
+export function localized(lang: Lang, om?: string | null, en?: string | null): string {
   if (lang === "om") return (om || en || "").trim();
   return (en || om || "").trim();
 }
