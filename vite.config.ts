@@ -5,6 +5,7 @@
 //     React/TanStack dedupe, error logger plugins, and sandbox detection (port/host/strictPort).
 // You can pass additional config via defineConfig({ vite: { ... }, etc... }) if needed.
 import { defineConfig } from "@lovable.dev/vite-tanstack-config";
+import { VitePWA } from "vite-plugin-pwa";
 
 export default defineConfig({
   tanstackStart: {
@@ -12,4 +13,61 @@ export default defineConfig({
     // nitro/vite builds from this
     server: { entry: "server" },
   },
+  plugins: [
+    VitePWA({
+      registerType: "autoUpdate",
+      injectRegister: false, // we register via virtual:pwa-register in client code
+      includeAssets: ["favicon.ico", "apple-touch-icon.png"],
+      // TanStack Start + nitro tunnel the client build into .output/public, so
+      // emit sw.js/manifest there too and precache the real assets inside it.
+      outDir: ".output/public",
+      manifest: {
+        name: "Oromia Academy — Barnoota Teeknoolojii fi Qormaata Dijitaalaa",
+        short_name: "OromiaAcademy",
+        description:
+          "Afaan Oromoo-first technology education and digital examinations, installable on any device.",
+        lang: "om",
+        start_url: "/",
+        scope: "/",
+        display: "standalone",
+        orientation: "any",
+        background_color: "#07251e",
+        theme_color: "#13795f",
+        categories: ["education", "productivity"],
+        icons: [
+          { src: "/icon-192.png", sizes: "192x192", type: "image/png" },
+          { src: "/icon-512.png", sizes: "512x512", type: "image/png" },
+          {
+            src: "/icon-maskable-512.png",
+            sizes: "512x512",
+            type: "image/png",
+            purpose: "maskable",
+          },
+        ],
+        shortcuts: [
+          {
+            name: "Dashboard",
+            short_name: "Dash",
+            url: "/dashboard",
+            icons: [{ src: "/icon-192.png", sizes: "192x192", type: "image/png" }],
+          },
+          {
+            name: "Admin",
+            short_name: "Admin",
+            url: "/admin",
+            icons: [{ src: "/icon-192.png", sizes: "192x192", type: "image/png" }],
+          },
+        ],
+      },
+      workbox: {
+        globPatterns: ["**/*.{js,css,html,ico,png,svg,webmanifest}"],
+        navigateFallback: null,
+        cleanupOutdatedCaches: true,
+        maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
+      },
+      devOptions: {
+        enabled: false,
+      },
+    }),
+  ],
 });

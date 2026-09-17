@@ -53,7 +53,7 @@ export async function getUserProfile(uid: string): Promise<UserProfile | null> {
 
 export async function saveUserProfile(profile: UserProfile): Promise<void> {
   const { id, ...rest } = profile;
-  await setDoc(doc(col.users(), id), { ...rest, updatedAt: Date.now() }, { merge: true });
+  await setDoc(doc(col.users(), id), { id, ...rest, updatedAt: Date.now() }, { merge: true });
 }
 
 export async function listUsers(): Promise<UserProfile[]> {

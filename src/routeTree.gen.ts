@@ -10,9 +10,21 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as AdminRouteImport } from './routes/admin'
+import { Route as AdminRouteImport } from './routes/_admin'
+import { Route as AuthedRouteImport } from './routes/_authed'
 import { Route as AuthRouteImport } from './routes/auth'
-import { Route as DashboardRouteImport } from './routes/dashboard'
+import { Route as AdminAdminRouteImport } from './routes/_admin.admin'
+import { Route as AuthedDashboardRouteImport } from './routes/_authed.dashboard'
+import { Route as ExamExamIdRouteImport } from './routes/exam.$examId'
+import { Route as ResultAttemptIdRouteImport } from './routes/result.$attemptId'
+import { Route as AdminAdminAnalyticsRouteImport } from './routes/_admin.admin.analytics'
+import { Route as AdminAdminAuditRouteImport } from './routes/_admin.admin.audit'
+import { Route as AdminAdminCoursesRouteImport } from './routes/_admin.admin.courses'
+import { Route as AdminAdminExamsRouteImport } from './routes/_admin.admin.exams'
+import { Route as AdminAdminQuestionsRouteImport } from './routes/_admin.admin.questions'
+import { Route as AdminAdminResultsRouteImport } from './routes/_admin.admin.results'
+import { Route as AdminAdminSettingsRouteImport } from './routes/_admin.admin.settings'
+import { Route as AdminAdminStudentsRouteImport } from './routes/_admin.admin.students'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -20,8 +32,11 @@ const IndexRoute = IndexRouteImport.update({
   getParentRoute: () => rootRouteImport,
 } as any)
 const AdminRoute = AdminRouteImport.update({
-  id: '/admin',
-  path: '/admin',
+  id: '/_admin',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AuthedRoute = AuthedRouteImport.update({
+  id: '/_authed',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthRoute = AuthRouteImport.update({
@@ -29,44 +44,178 @@ const AuthRoute = AuthRouteImport.update({
   path: '/auth',
   getParentRoute: () => rootRouteImport,
 } as any)
-const DashboardRoute = DashboardRouteImport.update({
+const AdminAdminRoute = AdminAdminRouteImport.update({
+  id: '/admin',
+  path: '/admin',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AuthedDashboardRoute = AuthedDashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
+  getParentRoute: () => AuthedRoute,
+} as any)
+const ExamExamIdRoute = ExamExamIdRouteImport.update({
+  id: '/exam/$examId',
+  path: '/exam/$examId',
   getParentRoute: () => rootRouteImport,
+} as any)
+const ResultAttemptIdRoute = ResultAttemptIdRouteImport.update({
+  id: '/result/$attemptId',
+  path: '/result/$attemptId',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminAdminAnalyticsRoute = AdminAdminAnalyticsRouteImport.update({
+  id: '/analytics',
+  path: '/analytics',
+  getParentRoute: () => AdminAdminRoute,
+} as any)
+const AdminAdminAuditRoute = AdminAdminAuditRouteImport.update({
+  id: '/audit',
+  path: '/audit',
+  getParentRoute: () => AdminAdminRoute,
+} as any)
+const AdminAdminCoursesRoute = AdminAdminCoursesRouteImport.update({
+  id: '/courses',
+  path: '/courses',
+  getParentRoute: () => AdminAdminRoute,
+} as any)
+const AdminAdminExamsRoute = AdminAdminExamsRouteImport.update({
+  id: '/exams',
+  path: '/exams',
+  getParentRoute: () => AdminAdminRoute,
+} as any)
+const AdminAdminQuestionsRoute = AdminAdminQuestionsRouteImport.update({
+  id: '/questions',
+  path: '/questions',
+  getParentRoute: () => AdminAdminRoute,
+} as any)
+const AdminAdminResultsRoute = AdminAdminResultsRouteImport.update({
+  id: '/results',
+  path: '/results',
+  getParentRoute: () => AdminAdminRoute,
+} as any)
+const AdminAdminSettingsRoute = AdminAdminSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => AdminAdminRoute,
+} as any)
+const AdminAdminStudentsRoute = AdminAdminStudentsRouteImport.update({
+  id: '/students',
+  path: '/students',
+  getParentRoute: () => AdminAdminRoute,
 } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/admin': typeof AdminRoute
   '/auth': typeof AuthRoute
-  '/dashboard': typeof DashboardRoute
+  '/admin': typeof AdminAdminRouteWithChildren
+  '/dashboard': typeof AuthedDashboardRoute
+  '/exam/$examId': typeof ExamExamIdRoute
+  '/result/$attemptId': typeof ResultAttemptIdRoute
+  '/admin/analytics': typeof AdminAdminAnalyticsRoute
+  '/admin/audit': typeof AdminAdminAuditRoute
+  '/admin/courses': typeof AdminAdminCoursesRoute
+  '/admin/exams': typeof AdminAdminExamsRoute
+  '/admin/questions': typeof AdminAdminQuestionsRoute
+  '/admin/results': typeof AdminAdminResultsRoute
+  '/admin/settings': typeof AdminAdminSettingsRoute
+  '/admin/students': typeof AdminAdminStudentsRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/admin': typeof AdminRoute
   '/auth': typeof AuthRoute
-  '/dashboard': typeof DashboardRoute
+  '/admin': typeof AdminAdminRouteWithChildren
+  '/dashboard': typeof AuthedDashboardRoute
+  '/exam/$examId': typeof ExamExamIdRoute
+  '/result/$attemptId': typeof ResultAttemptIdRoute
+  '/admin/analytics': typeof AdminAdminAnalyticsRoute
+  '/admin/audit': typeof AdminAdminAuditRoute
+  '/admin/courses': typeof AdminAdminCoursesRoute
+  '/admin/exams': typeof AdminAdminExamsRoute
+  '/admin/questions': typeof AdminAdminQuestionsRoute
+  '/admin/results': typeof AdminAdminResultsRoute
+  '/admin/settings': typeof AdminAdminSettingsRoute
+  '/admin/students': typeof AdminAdminStudentsRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/admin': typeof AdminRoute
+  '/_admin': typeof AdminRouteWithChildren
+  '/_authed': typeof AuthedRouteWithChildren
   '/auth': typeof AuthRoute
-  '/dashboard': typeof DashboardRoute
+  '/_admin/admin': typeof AdminAdminRouteWithChildren
+  '/_authed/dashboard': typeof AuthedDashboardRoute
+  '/exam/$examId': typeof ExamExamIdRoute
+  '/result/$attemptId': typeof ResultAttemptIdRoute
+  '/_admin/admin/analytics': typeof AdminAdminAnalyticsRoute
+  '/_admin/admin/audit': typeof AdminAdminAuditRoute
+  '/_admin/admin/courses': typeof AdminAdminCoursesRoute
+  '/_admin/admin/exams': typeof AdminAdminExamsRoute
+  '/_admin/admin/questions': typeof AdminAdminQuestionsRoute
+  '/_admin/admin/results': typeof AdminAdminResultsRoute
+  '/_admin/admin/settings': typeof AdminAdminSettingsRoute
+  '/_admin/admin/students': typeof AdminAdminStudentsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/admin' | '/auth' | '/dashboard'
+  fullPaths:
+    | '/'
+    | '/auth'
+    | '/admin'
+    | '/dashboard'
+    | '/exam/$examId'
+    | '/result/$attemptId'
+    | '/admin/analytics'
+    | '/admin/audit'
+    | '/admin/courses'
+    | '/admin/exams'
+    | '/admin/questions'
+    | '/admin/results'
+    | '/admin/settings'
+    | '/admin/students'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/admin' | '/auth' | '/dashboard'
-  id: '__root__' | '/' | '/admin' | '/auth' | '/dashboard'
+  to:
+    | '/'
+    | '/auth'
+    | '/admin'
+    | '/dashboard'
+    | '/exam/$examId'
+    | '/result/$attemptId'
+    | '/admin/analytics'
+    | '/admin/audit'
+    | '/admin/courses'
+    | '/admin/exams'
+    | '/admin/questions'
+    | '/admin/results'
+    | '/admin/settings'
+    | '/admin/students'
+  id:
+    | '__root__'
+    | '/'
+    | '/_admin'
+    | '/_authed'
+    | '/auth'
+    | '/_admin/admin'
+    | '/_authed/dashboard'
+    | '/exam/$examId'
+    | '/result/$attemptId'
+    | '/_admin/admin/analytics'
+    | '/_admin/admin/audit'
+    | '/_admin/admin/courses'
+    | '/_admin/admin/exams'
+    | '/_admin/admin/questions'
+    | '/_admin/admin/results'
+    | '/_admin/admin/settings'
+    | '/_admin/admin/students'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  AdminRoute: typeof AdminRoute
+  AdminRoute: typeof AdminRouteWithChildren
+  AuthedRoute: typeof AuthedRouteWithChildren
   AuthRoute: typeof AuthRoute
-  DashboardRoute: typeof DashboardRoute
+  ExamExamIdRoute: typeof ExamExamIdRoute
+  ResultAttemptIdRoute: typeof ResultAttemptIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -78,11 +227,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/admin': {
-      id: '/admin'
-      path: '/admin'
-      fullPath: '/admin'
+    '/_admin': {
+      id: '/_admin'
+      path: ''
+      fullPath: '/'
       preLoaderRoute: typeof AdminRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/_authed': {
+      id: '/_authed'
+      path: ''
+      fullPath: '/'
+      preLoaderRoute: typeof AuthedRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/auth': {
@@ -92,21 +248,147 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/dashboard': {
-      id: '/dashboard'
+    '/_admin/admin': {
+      id: '/_admin/admin'
+      path: '/admin'
+      fullPath: '/admin'
+      preLoaderRoute: typeof AdminAdminRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/_authed/dashboard': {
+      id: '/_authed/dashboard'
       path: '/dashboard'
       fullPath: '/dashboard'
-      preLoaderRoute: typeof DashboardRouteImport
+      preLoaderRoute: typeof AuthedDashboardRouteImport
+      parentRoute: typeof AuthedRoute
+    }
+    '/exam/$examId': {
+      id: '/exam/$examId'
+      path: '/exam/$examId'
+      fullPath: '/exam/$examId'
+      preLoaderRoute: typeof ExamExamIdRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/result/$attemptId': {
+      id: '/result/$attemptId'
+      path: '/result/$attemptId'
+      fullPath: '/result/$attemptId'
+      preLoaderRoute: typeof ResultAttemptIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/_admin/admin/analytics': {
+      id: '/_admin/admin/analytics'
+      path: '/analytics'
+      fullPath: '/admin/analytics'
+      preLoaderRoute: typeof AdminAdminAnalyticsRouteImport
+      parentRoute: typeof AdminAdminRoute
+    }
+    '/_admin/admin/audit': {
+      id: '/_admin/admin/audit'
+      path: '/audit'
+      fullPath: '/admin/audit'
+      preLoaderRoute: typeof AdminAdminAuditRouteImport
+      parentRoute: typeof AdminAdminRoute
+    }
+    '/_admin/admin/courses': {
+      id: '/_admin/admin/courses'
+      path: '/courses'
+      fullPath: '/admin/courses'
+      preLoaderRoute: typeof AdminAdminCoursesRouteImport
+      parentRoute: typeof AdminAdminRoute
+    }
+    '/_admin/admin/exams': {
+      id: '/_admin/admin/exams'
+      path: '/exams'
+      fullPath: '/admin/exams'
+      preLoaderRoute: typeof AdminAdminExamsRouteImport
+      parentRoute: typeof AdminAdminRoute
+    }
+    '/_admin/admin/questions': {
+      id: '/_admin/admin/questions'
+      path: '/questions'
+      fullPath: '/admin/questions'
+      preLoaderRoute: typeof AdminAdminQuestionsRouteImport
+      parentRoute: typeof AdminAdminRoute
+    }
+    '/_admin/admin/results': {
+      id: '/_admin/admin/results'
+      path: '/results'
+      fullPath: '/admin/results'
+      preLoaderRoute: typeof AdminAdminResultsRouteImport
+      parentRoute: typeof AdminAdminRoute
+    }
+    '/_admin/admin/settings': {
+      id: '/_admin/admin/settings'
+      path: '/settings'
+      fullPath: '/admin/settings'
+      preLoaderRoute: typeof AdminAdminSettingsRouteImport
+      parentRoute: typeof AdminAdminRoute
+    }
+    '/_admin/admin/students': {
+      id: '/_admin/admin/students'
+      path: '/students'
+      fullPath: '/admin/students'
+      preLoaderRoute: typeof AdminAdminStudentsRouteImport
+      parentRoute: typeof AdminAdminRoute
     }
   }
 }
 
+interface AdminAdminRouteChildren {
+  AdminAdminAnalyticsRoute: typeof AdminAdminAnalyticsRoute
+  AdminAdminAuditRoute: typeof AdminAdminAuditRoute
+  AdminAdminCoursesRoute: typeof AdminAdminCoursesRoute
+  AdminAdminExamsRoute: typeof AdminAdminExamsRoute
+  AdminAdminQuestionsRoute: typeof AdminAdminQuestionsRoute
+  AdminAdminResultsRoute: typeof AdminAdminResultsRoute
+  AdminAdminSettingsRoute: typeof AdminAdminSettingsRoute
+  AdminAdminStudentsRoute: typeof AdminAdminStudentsRoute
+}
+
+const AdminAdminRouteChildren: AdminAdminRouteChildren = {
+  AdminAdminAnalyticsRoute: AdminAdminAnalyticsRoute,
+  AdminAdminAuditRoute: AdminAdminAuditRoute,
+  AdminAdminCoursesRoute: AdminAdminCoursesRoute,
+  AdminAdminExamsRoute: AdminAdminExamsRoute,
+  AdminAdminQuestionsRoute: AdminAdminQuestionsRoute,
+  AdminAdminResultsRoute: AdminAdminResultsRoute,
+  AdminAdminSettingsRoute: AdminAdminSettingsRoute,
+  AdminAdminStudentsRoute: AdminAdminStudentsRoute,
+}
+
+const AdminAdminRouteWithChildren = AdminAdminRoute._addFileChildren(
+  AdminAdminRouteChildren,
+)
+
+interface AdminRouteChildren {
+  AdminAdminRoute: typeof AdminAdminRouteWithChildren
+}
+
+const AdminRouteChildren: AdminRouteChildren = {
+  AdminAdminRoute: AdminAdminRouteWithChildren,
+}
+
+const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)
+
+interface AuthedRouteChildren {
+  AuthedDashboardRoute: typeof AuthedDashboardRoute
+}
+
+const AuthedRouteChildren: AuthedRouteChildren = {
+  AuthedDashboardRoute: AuthedDashboardRoute,
+}
+
+const AuthedRouteWithChildren =
+  AuthedRoute._addFileChildren(AuthedRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  AdminRoute: AdminRoute,
+  AdminRoute: AdminRouteWithChildren,
+  AuthedRoute: AuthedRouteWithChildren,
   AuthRoute: AuthRoute,
-  DashboardRoute: DashboardRoute,
+  ExamExamIdRoute: ExamExamIdRoute,
+  ResultAttemptIdRoute: ResultAttemptIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

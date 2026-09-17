@@ -14,6 +14,8 @@ import { reportLovableError } from "../lib/lovable-error-reporting";
 import { ThemeProvider } from "../components/theme";
 import { I18nProvider } from "../i18n";
 import { AuthProvider } from "../lib/auth";
+import { Toaster } from "../components/ui/sonner";
+import { PwaInstaller } from "../components/pwa-installer";
 
 function NotFoundComponent() {
   return (
@@ -80,11 +82,21 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
+      { name: "theme-color", content: "#13795f" },
+      { name: "apple-mobile-web-app-capable", content: "yes" },
+      { name: "apple-mobile-web-app-status-bar-style", content: "default" },
+      { name: "apple-mobile-web-app-title", content: "OromiaAcademy" },
       { title: "Oromia Academy" },
-      { name: "description", content: "Afaan Oromoo-first technology education and digital examinations." },
+      {
+        name: "description",
+        content: "Afaan Oromoo-first technology education and digital examinations.",
+      },
       { name: "author", content: "Oromia Academy" },
       { property: "og:title", content: "Oromia Academy" },
-      { property: "og:description", content: "Practical technology education and digital examinations in Afaan Oromoo." },
+      {
+        property: "og:description",
+        content: "Practical technology education and digital examinations in Afaan Oromoo.",
+      },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
     ],
@@ -94,6 +106,8 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
         href: appCss,
       },
       { rel: "icon", href: "/favicon.ico", type: "image/x-icon" },
+      { rel: "manifest", href: "/manifest.webmanifest" },
+      { rel: "apple-touch-icon", href: "/apple-touch-icon.png" },
     ],
   }),
   shellComponent: RootShell,
@@ -125,6 +139,8 @@ function RootComponent() {
         <I18nProvider>
           <AuthProvider>
             <Outlet />
+            <Toaster richColors position="top-right" />
+            <PwaInstaller />
           </AuthProvider>
         </I18nProvider>
       </ThemeProvider>

@@ -31,6 +31,10 @@ export const om = {
   "common.notFound": "Hin argamne",
   "common.error": "Dogoggora",
   "common.success": "Milkaa'e",
+  "error.auth.required": "Sagantiin kee xumure — itti deebi'uun seeni.",
+  "error.auth.forbidden": "Gocha kana raawwachuuf hayyama hin qabdu.",
+  "error.auth.suspended": "Herregni kee dhaabbateera.",
+  "error.unknown": "Dogoggora ({code})",
   "common.export": "Baasi",
   "common.total": "Waliigala",
   "common.date": "Guyyaa",
@@ -71,8 +75,10 @@ export const om = {
 
   // landing
   "landing.badge": "Barnoota Teeknooloojii Gochaan",
-  "landing.heroTitle": "Teeknooloojii fi AI baradhu; dandeettii kee gara sadarkaa ol'aanaatti ceesisi.",
-  "landing.heroQuestion": "Namni hundi AI fi teeknooloojiidhaan gara fuulduraatti deemaa jira — ati eessa jirta?",
+  "landing.heroTitle":
+    "Teeknooloojii fi AI baradhu; dandeettii kee gara sadarkaa ol'aanaatti ceesisi.",
+  "landing.heroQuestion":
+    "Namni hundi AI fi teeknooloojiidhaan gara fuulduraatti deemaa jira — ati eessa jirta?",
   "landing.heroSubtitle":
     "Oromia Academy suuraa fi viidiyoo AI'n hojjechuu, Telegram irraa galii argachuu, akkasumas boot Telegram AI waliin walitti hidhuu si barsiisa. Barnoonni keenya gochaan kan deemuudha.",
   "landing.ctaPrimary": "Amma Galmaa'i",
@@ -90,7 +96,8 @@ export const om = {
   "landing.why3Title": "Afaan Keetiin",
   "landing.why3Body": "Barnoonnii fi qormaanni Afaan Oromootiin. English illee ni jira.",
   "landing.why4Title": "Bilbila Irratti",
-  "landing.why4Body": "Appii kana bilbila kee irratti buufattee, interneetii cituu illee itti fufta.",
+  "landing.why4Body":
+    "Appii kana bilbila kee irratti buufattee, interneetii cituu illee itti fufta.",
   "landing.registerTitle": "Galmaa'uuf Admin Qunnami",
   "landing.registerBody":
     "Barnoota barbaadde filadhuutii Telegram irratti admin qunnami. Odeeffannoo galmee guutuu ni argatta.",
@@ -283,17 +290,32 @@ export const om = {
   // pwa
   "pwa.install": "Appii Buufadhu",
   "pwa.installBody": "Oromia Academy bilbila kee irratti buufadhu.",
+  "pwa.installCta": "Buufadhu",
+  "pwa.updateReady": "Gulaallin haaraan qophaa'eera",
+  "pwa.updateBody": "Gulaallicha fudhachuuf paagii haaromksi.",
+  "pwa.reload": "Haaromksi",
   "setup.needed": "Firebase qindaa'inni hin xumuramne. Admin qunnami.",
 
   // google / department
   "auth.google": "Google'n Seeni",
-  "auth.googleUnavailable": "Google'n seenuun amma hin danda'amu — imeelii fi jecha icciitiitiin seeni.",
+  "auth.googleUnavailable":
+    "Google'n seenuun amma hin danda'amu — imeelii fi jecha icciitiitiin seeni.",
   "auth.googlePopupClosed": "Foddaan Google cufameera. Irra deebi'ii yaali.",
   "auth.or": "ykn",
   "auth.department": "Damee",
   "auth.selectDepartment": "Damee Filadhu",
   "auth.departmentRequired": "Maaloo damee kee filadhu.",
   "auth.emailNote": "Maqaa, imeelii fi damee kee galchi.",
+  "auth.registrationFailed":
+    "Galmaa'iinsi immoo hin xumuramne — Firebase sirriitti qindaa'ee jiraachuu isaa mirkaneessi.",
+  "auth.ownerSetupTitle": "Abbaa (Owner) academy ni uumta?",
+  "auth.ownerSetupBody":
+    "Kun database haaraa irratti herrega jalqabaa dha. Owner ta'uuf lola — gara admin poortaalii guutuutti fayyadamta.",
+  "auth.claimOwner": "Owner ta'i",
+  "auth.ownerClaimed": "Baga! Amma owner taate.",
+  "auth.ownerExists": "Owner isa duraan jira.",
+  "common.localMode":
+    "Daataa demo — ragaa kun fayyaa kana qofa keessatti kuusama. Firebase qindeessuudhaan kuusann caalaa gadi.",
   "dash.completeProfile": "Piroofaayilii kee xumuri",
   "dash.completeProfileBody": "Damee ati barachuu barbaaddu filadhu.",
   "dash.department": "Damee",
@@ -333,6 +355,10 @@ export const en: Record<TranslationKey, string> = {
   "common.notFound": "Not found",
   "common.error": "Error",
   "common.success": "Success",
+  "error.auth.required": "Your session has expired — please sign in again.",
+  "error.auth.forbidden": "You don't have permission to perform this action.",
+  "error.auth.suspended": "Your account has been suspended.",
+  "error.unknown": "Error ({code})",
   "common.export": "Export",
   "common.total": "Total",
   "common.date": "Date",
@@ -372,7 +398,8 @@ export const en: Record<TranslationKey, string> = {
 
   "landing.badge": "Practical technology training",
   "landing.heroTitle": "Learn technology and AI — take your skills to the next level.",
-  "landing.heroQuestion": "Everyone is moving into the future with AI and technology — where are you?",
+  "landing.heroQuestion":
+    "Everyone is moving into the future with AI and technology — where are you?",
   "landing.heroSubtitle":
     "Oromia Academy teaches you AI image and video creation, earning through Telegram, and building Telegram bots connected to AI. Everything is hands-on.",
   "landing.ctaPrimary": "Register now",
@@ -575,6 +602,10 @@ export const en: Record<TranslationKey, string> = {
 
   "pwa.install": "Install app",
   "pwa.installBody": "Install Oromia Academy on your phone.",
+  "pwa.installCta": "Install",
+  "pwa.updateReady": "A new version is ready",
+  "pwa.updateBody": "Reload the page to get the latest version.",
+  "pwa.reload": "Reload",
   "setup.needed": "Firebase setup is incomplete. Contact the admin.",
 
   "auth.google": "Continue with Google",
@@ -585,6 +616,16 @@ export const en: Record<TranslationKey, string> = {
   "auth.selectDepartment": "Select your department",
   "auth.departmentRequired": "Please choose your department.",
   "auth.emailNote": "Enter your name, email and department.",
+  "auth.registrationFailed":
+    "Registration couldn't be completed — make sure Firebase is configured and your account was created.",
+  "auth.ownerSetupTitle": "Bootstrap the academy owner?",
+  "auth.ownerSetupBody":
+    "This is the first account on a fresh database. Claim the owner role to unlock the full admin panel.",
+  "auth.claimOwner": "Claim Owner access",
+  "auth.ownerClaimed": "Done! You are now the owner.",
+  "auth.ownerExists": "An owner already exists.",
+  "common.localMode":
+    "Demo mode — this data is stored only in this browser. Connect Firebase to persist real data.",
   "dash.completeProfile": "Complete your profile",
   "dash.completeProfileBody": "Choose the department you want to study.",
   "dash.department": "Department",

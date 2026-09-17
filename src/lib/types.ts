@@ -1,12 +1,14 @@
-export type Role = "owner" | "instructor" | "student";
+export type Role = "owner" | "admin" | "instructor" | "student";
 
 export type UserProfile = {
   id: string;
+  uid?: string;
   fullName: string;
   email: string;
   phone?: string;
   department?: string;
   role: Role;
+  status?: "active" | "suspended";
   enrolledCourseIds: string[];
   progress?: Record<string, number>;
   createdAt?: number;
@@ -54,13 +56,7 @@ export type Question = {
 };
 
 export type ExamStatus =
-  | "draft"
-  | "scheduled"
-  | "active"
-  | "closed"
-  | "resultsPending"
-  | "resultsPublished"
-  | "archived";
+  "draft" | "scheduled" | "active" | "closed" | "resultsPending" | "resultsPublished" | "archived";
 
 export type Exam = {
   id: string;
@@ -178,4 +174,5 @@ export const DEFAULT_SETTINGS: AcademySettings = {
   contactPhone: "",
 };
 
-export const OWNER_EMAIL = "usamaawol0@gmail.com";
+// Owner email removed - using Firebase Custom Claims instead
+// Set custom claims via Firebase Admin SDK or server endpoint

@@ -4,7 +4,13 @@
  * Uses a Firebase service account to talk to the Firestore REST API with full
  * authority, so Firestore security rules can stay strict for browsers.
  * Nothing in this file may ever be imported from client code.
+ *
+ * DEVELOPMENT FALLBACK: when `FIREBASE_SERVICE_ACCOUNT_JSON` is not configured,
+ * requests are authorised with the caller's own Firebase ID token (sent as the
+ * `x-id-token` header). This lets the admin dashboard run without a service
+ * account so long as the Firestore rules allow the signed-in user access.
  */
+import { getRequestHeader } from "@tanstack/react-start/server";
 
 type ServiceAccount = {
   project_id: string;
@@ -25,6 +31,11 @@ function serviceAccount(): ServiceAccount {
 }
 
 export function projectId(): string {
+  const raw = process.env["FIREBASE_SERVICE_ACCOUNT_JSON"];
+  if (!raw) {
+    const domain = process.env["VITE_FIREBASE_AUTH_DOMAIN"] ?? "oromia-academy.firebaseapp.com";
+    return domain.split(".")[0]!;
+  }
   return serviceAccount().project_id;
 }
 
@@ -51,6 +62,19 @@ let tokenCache: { token: string; expiresAt: number } | null = null;
 
 async function accessToken(): Promise<string> {
   if (tokenCache && tokenCache.expiresAt > Date.now() + 60_000) return tokenCache.token;
+
+  const raw = process.env["FIREBASE_SERVICE_ACCOUNT_JSON"];
+  if (!raw) {
+    // No service account → use the signed-in user's own ID token (dev fallback).
+    const userToken = getRequestHeader("x-id-token") ?? "";
+    if (!userToken) {
+      throw new Error(
+        "FIREBASE_SERVICE_ACCOUNT_JSON is not configured. Sign in again, or set the variable in .env.",
+      );
+    }
+    return userToken;
+  }
+
   const sa = serviceAccount();
   const iat = Math.floor(Date.now() / 1000);
   const header = b64url(new TextEncoder().encode(JSON.stringify({ alg: "RS256", typ: "JWT" })));
@@ -148,14 +172,17 @@ function docToObject<T>(doc: { name: string; fields?: Record<string, FsValue> })
 
 async function api(path: string, init?: RequestInit): Promise<unknown> {
   const token = await accessToken();
-  const res = await fetch(`${FIRESTORE}/projects/${projectId()}/databases/(default)/documents${path}`, {
-    ...init,
-    headers: {
-      ...(init?.headers as Record<string, string> | undefined),
-      authorization: `Bearer ${token}`,
-      "content-type": "application/json",
+  const res = await fetch(
+    `${FIRESTORE}/projects/${projectId()}/databases/(default)/documents${path}`,
+    {
+      ...init,
+      headers: {
+        ...(init?.headers as Record<string, string> | undefined),
+        authorization: `Bearer ${token}`,
+        "content-type": "application/json",
+      },
     },
-  });
+  );
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(`Firestore ${res.status}: ${await res.text()}`);
   return res.json();
@@ -186,10 +213,7 @@ export async function fsSet(
   });
 }
 
-export async function fsCreate(
-  collection: string,
-  data: Record<string, unknown>,
-): Promise<string> {
+export async function fsCreate(collection: string, data: Record<string, unknown>): Promise<string> {
   const doc = (await api(`/${collection}`, {
     method: "POST",
     body: JSON.stringify({ fields: encodeFields(data) }),
@@ -219,11 +243,7 @@ export async function fsList<T>(collection: string): Promise<T[]> {
 
 export type Filter = [field: string, op: "EQUAL" | "GREATER_THAN" | "LESS_THAN", value: unknown];
 
-export async function fsQuery<T>(
-  collection: string,
-  filters: Filter[],
-  limit = 500,
-): Promise<T[]> {
+export async function fsQuery<T>(collection: string, filters: Filter[], limit = 500): Promise<T[]> {
   const token = await accessToken();
   const body = {
     structuredQuery: {
@@ -252,7 +272,9 @@ export async function fsQuery<T>(
     },
   );
   if (!res.ok) throw new Error(`Firestore query ${res.status}: ${await res.text()}`);
-  const rows = (await res.json()) as { document?: { name: string; fields?: Record<string, FsValue> } }[];
+  const rows = (await res.json()) as {
+    document?: { name: string; fields?: Record<string, FsValue> };
+  }[];
   return rows.filter((r) => r.document).map((r) => docToObject<T>(r.document!));
 }
 
@@ -290,6 +312,60 @@ export async function verifyIdToken(idToken: string): Promise<VerifiedUser> {
 }
 
 /* ---------------------------------- helpers ---------------------------------- */
+
+export type SystemDiagnostics = {
+  serviceAccountSet: boolean;
+  serviceAccountValid: boolean;
+  projectId: string | null;
+  apiKeySet: boolean;
+  tokenAcquired: boolean;
+  firestoreReachable: boolean;
+};
+
+/**
+ * Reports the server-side Firebase configuration without leaking secrets.
+ * Used by the admin "Server status" card so misconfiguration is obvious in-app.
+ */
+export async function systemDiagnostics(): Promise<SystemDiagnostics> {
+  const out: SystemDiagnostics = {
+    serviceAccountSet: false,
+    serviceAccountValid: false,
+    projectId: null,
+    apiKeySet: Boolean(process.env["GOOGLE_API_KEY"] ?? process.env["VITE_FIREBASE_API_KEY"]),
+    tokenAcquired: false,
+    firestoreReachable: false,
+  };
+
+  const raw = process.env["FIREBASE_SERVICE_ACCOUNT_JSON"];
+  out.serviceAccountSet = Boolean(raw);
+  if (!raw) return out;
+
+  let sa: ServiceAccount;
+  try {
+    sa = JSON.parse(raw) as ServiceAccount;
+  } catch {
+    return out; // invalid JSON → invalid
+  }
+  out.serviceAccountValid = Boolean(sa.private_key && sa.client_email && sa.project_id);
+  out.projectId = sa.project_id ?? null;
+  if (!out.serviceAccountValid) return out;
+
+  try {
+    await accessToken();
+    out.tokenAcquired = true;
+  } catch {
+    return out;
+  }
+
+  try {
+    // fsGet returns null for a missing doc (404) but throws on transport/auth errors
+    await fsGet("settings", "site");
+    out.firestoreReachable = true;
+  } catch {
+    /* unreachable */
+  }
+  return out;
+}
 
 export async function sha256Hex(input: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input));

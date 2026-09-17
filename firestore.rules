@@ -1,15 +1,19 @@
 rules_version = '2';
 
-// Oromia Academy security rules.
+// Oromia Academy Security Rules
 //
-// Principle: every write and every sensitive read happens through the trusted
-// application server (Firebase service account), which bypasses these rules.
-// Browsers therefore get the narrowest possible read access and NO write
-// access at all. Answer keys, exam passwords, grading data and audit logs are
-// unreachable from any browser, signed in or not.
+// Security Principle:
+// - All write operations and sensitive reads happen through the trusted
+//   application server (Firebase service account with admin privileges)
+// - Browsers get minimal read access and NO write access
+// - Answer keys, exam passwords, grading data, and audit logs are never
+//   accessible from any client, authenticated or not
+// - Role-based access control: owner > instructor > student
 
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    // ==================== HELPER FUNCTIONS ====================
 
     function signedIn() {
       return request.auth != null;
@@ -21,6 +25,14 @@ service cloud.firestore {
         : 'none';
     }
 
+    function isOwner() {
+      return myRole() == 'owner';
+    }
+
+    function isInstructor() {
+      return myRole() in ['owner', 'admin', 'instructor'];
+    }
+
     function isStaff() {
       return myRole() in ['owner', 'admin', 'instructor'];
     }
@@ -29,70 +41,116 @@ service cloud.firestore {
       return myRole() in ['owner', 'admin'];
     }
 
-    // ---- users -------------------------------------------------------------
-    // A user may read only their own profile. Nobody may write from a browser,
-    // so a student can never change their own role or status.
+    function isEnrolled(courseId) {
+      return signedIn() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        courseId in get(/databases/$(database)/documents/users/$(request.auth.uid)).data.enrolledCourseIds;
+    }
+
+    function isMyData(userId) {
+      return signedIn() && request.auth.uid == userId;
+    }
+
+    // ==================== USERS COLLECTION ====================
+    // User profiles with roles, enrollments, and progress
     match /users/{userId} {
-      allow get: if signedIn() && request.auth.uid == userId;
-      allow list: if isAdmin();
+      // Users can read their own profile
+      allow get: if isMyData(userId);
+      // Staff can list all users for management
+      allow list: if isStaff();
+      // Users can create their own profile (for signup)
+      // Only allow creating with role='student' and matching ID
+      allow create: if isMyData(userId) &&
+        request.resource.data.role == 'student';
+      // Users can update their own profile (for My Info editing)
+      // Cannot change role to prevent escalation; id must stay the document id
+      allow update: if isMyData(userId) &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role']) &&
+        request.resource.data.id == userId;
+      // No client-side deletes
+      allow delete: if false;
+    }
+
+    // ==================== COURSES COLLECTION ====================
+    // Course catalog information
+    match /courses/{courseId} {
+      // Public read access for course catalog
+      allow get: if true;
+      // Staff can list all courses
+      allow list: if isStaff();
+      // All writes go through server
       allow create, update, delete: if false;
     }
 
-    // ---- courses -----------------------------------------------------------
-    // Public catalogue information is readable; changes go through the server.
-    match /courses/{courseId} {
-      allow read: if true;
-      allow write: if false;
-    }
-
-    match /settings/{docId} {
-      allow read: if true;
-      allow write: if false;
-    }
-
-    // ---- question bank -----------------------------------------------------
-    // Contains correct answers and rubrics: never readable by any client.
+    // ==================== QUESTIONS COLLECTION ====================
+    // Question bank with correct answers and rubrics
+    // NEVER accessible from clients - server only
     match /questions/{questionId} {
       allow read, write: if false;
     }
 
-    // ---- exams -------------------------------------------------------------
-    // Exam configuration is served to students by the backend with the
-    // password stripped out; direct client reads are limited to staff.
+    // ==================== EXAMS COLLECTION ====================
+    // Exam configurations with passwords and settings
+    // Only staff can read exam configurations
     match /exams/{examId} {
-      allow read: if isStaff();
-      allow write: if false;
+      // Staff can read exam configurations
+      allow get: if isStaff();
+      // Staff can list exams
+      allow list: if isStaff();
+      // No client writes to prevent exam tampering
+      allow create, update, delete: if false;
     }
 
-    // Exam passwords live here, hashed, and are readable by nobody.
+    // ==================== EXAM SECRETS COLLECTION ====================
+    // Hashed exam passwords - NEVER accessible from clients
     match /examSecrets/{examId} {
       allow read, write: if false;
     }
 
-    // ---- attempts ----------------------------------------------------------
-    // A student may read their own attempts (the stored assignment does not
-    // include correct answers). All writes are server-side, so answers,
-    // timers, scores and submission state cannot be tampered with.
+    // ==================== EXAM ATTEMPTS COLLECTION ====================
+    // Student exam attempts with answers and scores
     match /examAttempts/{attemptId} {
+      // Students can read their own attempts
       allow get: if signedIn() && resource.data.studentId == request.auth.uid;
+      // Staff can list and read all attempts for grading
       allow list: if isStaff();
-      allow write: if false;
+      // No client writes to prevent answer tampering
+      allow create, update, delete: if false;
     }
 
-    // ---- notifications -----------------------------------------------------
+    // ==================== NOTIFICATIONS COLLECTION ====================
+    // System notifications for users
     match /notifications/{notificationId} {
-      allow read: if signedIn() &&
+      // Users can read notifications sent to them or to all
+      allow get: if signedIn() &&
         (resource.data.userId == 'all' || resource.data.userId == request.auth.uid);
-      allow write: if false;
+      // Users can list their own notifications
+      allow list: if signedIn();
+      // No client writes
+      allow create, update, delete: if false;
     }
 
-    // ---- audit logs --------------------------------------------------------
+    // ==================== AUDIT LOGS COLLECTION ====================
+    // Security audit trail - only owner can read
     match /auditLogs/{entryId} {
-      allow read: if isAdmin();
-      allow write: if false;
+      allow read: if isOwner();
+      allow list: if isOwner();
+      // No client writes
+      allow create, update, delete: if false;
     }
 
-    // Anything not listed above is denied.
+    // ==================== SETTINGS COLLECTION ====================
+    // Academy-wide settings (public read, server write)
+    match /settings/{docId} {
+      // Public read access for website content
+      allow get: if true;
+      allow list: if true;
+      // No client writes
+      allow create, update, delete: if false;
+    }
+
+    // ==================== DEFAULT DENY ====================
+    // Anything not explicitly allowed above is denied
     match /{document=**} {
       allow read, write: if false;
     }

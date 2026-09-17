@@ -107,6 +107,11 @@ export type Exam = {
 
 export type AttemptStatus = "in_progress" | "submitted" | "graded";
 
+export type PresentedQuestion = {
+  questionId: string;
+  optionOrder: string[];
+};
+
 export type Attempt = {
   id: string;
   examId: string;

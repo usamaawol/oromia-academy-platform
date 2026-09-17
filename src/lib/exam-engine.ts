@@ -1,4 +1,4 @@
-import type { Attempt, Exam, PresentedQuestion, Question } from "./types";
+import type { Attempt, Exam, PresentedQuestion, Question } from "./schema";
 
 /** Deterministic shuffle from a seed so a student always gets the same layout. */
 function seededRandom(seed: string) {
@@ -118,7 +118,7 @@ export function examWindowState(exam: Exam, now: number): "before" | "open" | "a
 }
 
 export function isExamOpenForStudents(exam: Exam, now: number): boolean {
-  if (exam.status !== "active" && exam.status !== "scheduled") return false;
+  if (exam.status !== "active") return false;
   return examWindowState(exam, now) === "open";
 }
 
@@ -130,8 +130,6 @@ export function validateExam(exam: Exam, questions: Question[]): ValidationIssue
   if (!exam.courseId) issues.push({ level: "error", message: "A course must be selected." });
   if (exam.questionIds.length === 0)
     issues.push({ level: "error", message: "The exam has no questions." });
-  if (!exam.password.trim())
-    issues.push({ level: "error", message: "An exam password is required." });
   if (exam.durationMin <= 0)
     issues.push({ level: "error", message: "Duration must be greater than 0." });
   if (exam.startAt && exam.endAt && exam.endAt <= exam.startAt)
@@ -145,13 +143,13 @@ export function validateExam(exam: Exam, questions: Question[]): ValidationIssue
   const selected = questions.filter((q) => exam.questionIds.includes(q.id));
   for (const q of selected) {
     if (q.type === "mcq" && !q.correctOptionId)
-      issues.push({ level: "error", message: `MCQ "${q.text.slice(0, 40)}" has no correct answer.` });
+      issues.push({ level: "error", message: `MCQ "${q.textOm.slice(0, 40)}" has no correct answer.` });
     if (q.type === "mcq" && q.options.length < 2)
-      issues.push({ level: "error", message: `MCQ "${q.text.slice(0, 40)}" needs at least 2 options.` });
+      issues.push({ level: "error", message: `MCQ "${q.textOm.slice(0, 40)}" needs at least 2 options.` });
     if (!q.approved)
       issues.push({
         level: "warning",
-        message: `Question "${q.text.slice(0, 40)}" is not approved yet.`,
+        message: `Question "${q.textOm.slice(0, 40)}" is not approved yet.`,
       });
   }
   return issues;

@@ -6,7 +6,10 @@ import {
   signInWithEmailAndPassword,
   signInWithPopup,
   signOut,
+  updatePassword,
   updateProfile,
+  reauthenticateWithCredential,
+  EmailAuthProvider,
   type User,
 } from "firebase/auth";
 import { createContext, useContext, useEffect, useMemo, useState, useCallback } from "react";
@@ -14,7 +17,7 @@ import { createContext, useContext, useEffect, useMemo, useState, useCallback } 
 import { getUserProfile, saveUserProfile } from "./db";
 import { firebaseReady, getFirebaseAuth } from "./firebase";
 import { mutate, readDb, uid } from "./local-store";
-import { OWNER_EMAIL, type UserProfile } from "./types";
+import { type UserProfile } from "./types";
 
 type AuthUser = { uid: string; email: string | null; displayName: string | null };
 
@@ -37,6 +40,7 @@ type AuthCtx = {
   loginWithGoogle: () => Promise<void>;
   logout: () => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
+  changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
   refreshProfile: () => Promise<void>;
   updateDepartment: (department: string) => Promise<void>;
 };
@@ -54,10 +58,6 @@ function readPw(): Record<string, string> {
   }
 }
 
-function isOwnerEmail(email: string) {
-  return email.trim().toLowerCase() === OWNER_EMAIL.toLowerCase();
-}
-
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
@@ -66,19 +66,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const loadProfile = useCallback(async (u: AuthUser) => {
     let p = await getUserProfile(u.uid);
-    const shouldBeOwner = isOwnerEmail(u.email ?? "");
     if (!p) {
       p = {
         id: u.uid,
+        uid: u.uid,
         fullName: u.displayName ?? (u.email ?? "").split("@")[0] ?? "",
         email: u.email ?? "",
-        role: shouldBeOwner ? "owner" : "student",
+        role: "student",
+        status: "active",
         enrolledCourseIds: [],
         createdAt: Date.now(),
       };
-      await saveUserProfile(p);
-    } else if (shouldBeOwner && p.role !== "owner") {
-      p = { ...p, role: "owner" };
       await saveUserProfile(p);
     }
     setProfile(p);
@@ -119,18 +117,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     async (input) => {
       const email = input.email.trim();
       if (localMode) {
-        const existing = readDb().users.find(
-          (u) => u.email.toLowerCase() === email.toLowerCase(),
-        );
+        const existing = readDb().users.find((u) => u.email.toLowerCase() === email.toLowerCase());
         if (existing) throw { code: "auth/email-already-in-use" };
         if (input.password.length < 6) throw { code: "auth/weak-password" };
+        const id = uid("u");
         const p: UserProfile = {
-          id: uid("u"),
+          id,
+          uid: id,
           fullName: input.fullName,
           email,
           ...(input.phone ? { phone: input.phone } : {}),
           ...(input.department ? { department: input.department } : {}),
-          role: isOwnerEmail(email) ? "owner" : "student",
+          role: "student",
+          status: "active",
           enrolledCourseIds: input.courseId ? [input.courseId] : [],
           createdAt: Date.now(),
         };
@@ -149,11 +148,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await updateProfile(cred.user, { displayName: input.fullName });
       const p: UserProfile = {
         id: cred.user.uid,
+        uid: cred.user.uid,
         fullName: input.fullName,
         email,
         ...(input.phone ? { phone: input.phone } : {}),
         ...(input.department ? { department: input.department } : {}),
-        role: isOwnerEmail(email) ? "owner" : "student",
+        role: "student",
+        status: "active",
         enrolledCourseIds: input.courseId ? [input.courseId] : [],
         createdAt: Date.now(),
       };
@@ -166,9 +167,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const login: AuthCtx["login"] = useCallback(
     async (email, password) => {
       if (localMode) {
-        const p = readDb().users.find(
-          (u) => u.email.toLowerCase() === email.trim().toLowerCase(),
-        );
+        const p = readDb().users.find((u) => u.email.toLowerCase() === email.trim().toLowerCase());
         const pw = readPw();
         if (!p || pw[p.id] !== password) throw { code: "auth/invalid-credential" };
         window.localStorage.setItem(SESSION_KEY, p.id);
@@ -185,7 +184,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (localMode) throw { code: "auth/google-unavailable" };
     const provider = new GoogleAuthProvider();
     provider.setCustomParameters({ prompt: "select_account" });
-    await signInWithPopup(getFirebaseAuth(), provider);
+    try {
+      await signInWithPopup(getFirebaseAuth(), provider);
+    } catch (err) {
+      console.error("Google Sign-In Error:", err);
+      throw err;
+    }
   }, [localMode]);
 
   const logout = useCallback(async () => {
@@ -207,6 +211,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       });
     },
     [localMode],
+  );
+
+  const changePassword = useCallback(
+    async (currentPassword: string, newPassword: string) => {
+      if (localMode) {
+        if (!user) throw { code: "auth/user-not-found" };
+        const pw = readPw();
+        if (pw[user.uid] !== currentPassword) {
+          throw { code: "auth/wrong-password" };
+        }
+        pw[user.uid] = newPassword;
+        window.localStorage.setItem(PW_KEY, JSON.stringify(pw));
+        return;
+      }
+      const auth = getFirebaseAuth();
+      const currentUser = auth.currentUser;
+      if (!currentUser || !currentUser.email) {
+        throw { code: "auth/user-not-found" };
+      }
+      const credential = EmailAuthProvider.credential(currentUser.email, currentPassword);
+      await reauthenticateWithCredential(currentUser, credential);
+      await updatePassword(currentUser, newPassword);
+    },
+    [localMode, user],
   );
 
   const refreshProfile = useCallback(async () => {
@@ -241,12 +269,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       loading,
       localMode,
       isOwner: profile?.role === "owner",
-      isStaff: profile?.role === "owner" || profile?.role === "instructor",
+      isStaff:
+        profile?.role === "owner" || profile?.role === "admin" || profile?.role === "instructor",
       register,
       login,
       loginWithGoogle,
       logout,
       resetPassword,
+      changePassword,
       refreshProfile,
       updateDepartment,
     }),
@@ -260,6 +290,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       loginWithGoogle,
       logout,
       resetPassword,
+      changePassword,
       refreshProfile,
       updateDepartment,
     ],
@@ -282,12 +313,18 @@ export function authErrorKey(
   | "auth.weakPassword"
   | "auth.googleUnavailable"
   | "auth.googlePopupClosed"
+  | "auth.registrationFailed"
   | "common.error" {
   const code = (err as { code?: string })?.code ?? "";
+  const message = (err as { message?: string })?.message ?? "";
+  console.error("Auth error details:", { code, message, err });
+
   if (code.includes("google-unavailable") || code.includes("operation-not-allowed"))
     return "auth.googleUnavailable";
   if (code.includes("popup-closed") || code.includes("cancelled-popup"))
     return "auth.googlePopupClosed";
+  if (code.includes("permission-denied") || code.includes("Firestore"))
+    return "auth.registrationFailed";
   if (code.includes("email-already-in-use")) return "auth.emailInUse";
   if (code.includes("weak-password")) return "auth.weakPassword";
   if (
