@@ -5,6 +5,7 @@ import {
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signInWithPopup,
+  signInWithRedirect,
   signOut,
   updatePassword,
   updateProfile,
@@ -187,6 +188,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       await signInWithPopup(getFirebaseAuth(), provider);
     } catch (err) {
+      const code = (err as { code?: string })?.code ?? "";
+      if (
+        code === "auth/popup-blocked" ||
+        code === "auth/operation-not-supported-in-this-environment"
+      ) {
+        await signInWithRedirect(getFirebaseAuth(), provider);
+        return;
+      }
       console.error("Google Sign-In Error:", err);
       throw err;
     }

@@ -61,12 +61,24 @@ service cloud.firestore {
       // Users can create their own profile (for signup)
       // Only allow creating with role='student' and matching ID
       allow create: if isMyData(userId) &&
-        request.resource.data.role == 'student';
+        request.resource.data.id == userId &&
+        request.resource.data.uid == userId &&
+        request.resource.data.role == 'student' &&
+        request.resource.data.status == 'active' &&
+        request.resource.data.email == request.auth.token.email;
       // Users can update their own profile (for My Info editing)
       // Cannot change role to prevent escalation; id must stay the document id
       allow update: if isMyData(userId) &&
-        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role']) &&
-        request.resource.data.id == userId;
+        request.resource.data.id == userId &&
+        request.resource.data.uid == resource.data.uid &&
+        request.resource.data.email == resource.data.email &&
+        request.resource.data.role == resource.data.role &&
+        request.resource.data.status == resource.data.status &&
+        request.resource.data.createdAt == resource.data.createdAt &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'id', 'uid', 'email', 'fullName', 'phone', 'department',
+          'enrolledCourseIds', 'role', 'status', 'createdAt', 'updatedAt'
+        ]);
       // No client-side deletes
       allow delete: if false;
     }
@@ -125,7 +137,10 @@ service cloud.firestore {
       allow get: if signedIn() &&
         (resource.data.userId == 'all' || resource.data.userId == request.auth.uid);
       // Users can list their own notifications
-      allow list: if signedIn();
+      // Queries must be constrained to the caller's own notifications or
+      // broadcast notifications; unfiltered collection reads are denied.
+      allow list: if signedIn() &&
+        (resource.data.userId == 'all' || resource.data.userId == request.auth.uid);
       // No client writes
       allow create, update, delete: if false;
     }

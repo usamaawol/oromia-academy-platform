@@ -187,10 +187,14 @@ export async function getServerNow(): Promise<number> {
 /* ---------------- notifications ---------------- */
 
 export async function listNotifications(userId: string): Promise<AppNotification[]> {
-  const snap = await getDocs(query(col.notifications(), orderBy("createdAt", "desc"), limit(50)));
-  return snap.docs
+  const [mine, broadcast] = await Promise.all([
+    getDocs(query(col.notifications(), where("userId", "==", userId), limit(50))),
+    getDocs(query(col.notifications(), where("userId", "==", "all"), limit(50))),
+  ]);
+  return [...mine.docs, ...broadcast.docs]
     .map((d) => withId<AppNotification>(d.id, d.data()))
-    .filter((n) => n.userId === "all" || n.userId === userId);
+    .sort((a, b) => b.createdAt - a.createdAt)
+    .slice(0, 50);
 }
 
 export async function pushNotification(n: Omit<AppNotification, "id">): Promise<void> {

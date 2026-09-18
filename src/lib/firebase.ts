@@ -11,7 +11,10 @@ import { getStorage, type FirebaseStorage } from "firebase/storage";
 const env = import.meta.env;
 
 export const firebaseConfig = {
-  apiKey: env["VITE_FIREBASE_API_KEY"] ?? "",
+  // Firebase web API keys are public client configuration. Keeping the
+  // project defaults here prevents production builds without injected env
+  // variables from silently falling back to browser-only demo storage.
+  apiKey: env["VITE_FIREBASE_API_KEY"] ?? "AIzaSyBHO0E9No9m90MCWjO48NIUak1DwVhA35s",
   authDomain: env["VITE_FIREBASE_AUTH_DOMAIN"] ?? "oromia-academy.firebaseapp.com",
   projectId: env["VITE_FIREBASE_PROJECT_ID"] ?? "oromia-academy",
   storageBucket: env["VITE_FIREBASE_STORAGE_BUCKET"] ?? "oromia-academy.firebasestorage.app",
