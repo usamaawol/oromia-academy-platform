@@ -2,19 +2,22 @@
  * Exam entry page — shows exam info, password input, then starts the exam.
  * After starting, renders the exam runner inline.
  */
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import {
   AlertCircle,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
   Clock3,
+  Download,
   Flag,
   Lock,
   Maximize,
   Send,
+  Trophy,
   Wifi,
   WifiOff,
+  XCircle,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -42,10 +45,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { useI18n, type TranslationKey } from "@/i18n";
 import { formatClock } from "@/lib/exam-engine";
-import { getExamInfo, startExam, saveAnswer, submitExam } from "@/lib/server-fns";
+import { getExamInfo, startExam, saveAnswer, submitExam, getMyResult } from "@/lib/server-fns";
 import { serverErrorMessage } from "@/lib/server-error";
 import { useServerFn } from "@/hooks/use-server-fn";
-import type { AttemptView, PublicQuestion } from "@/lib/schema";
+import type { AttemptView, PublicQuestion, ResultView } from "@/lib/schema";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/exam/$examId")({
@@ -66,6 +69,7 @@ function ExamEntryPage() {
   const [password, setPassword] = useState("");
   const [starting, setStarting] = useState(false);
   const [view, setView] = useState<AttemptView | null>(null);
+  const [submittedAttemptId, setSubmittedAttemptId] = useState<string | null>(null);
 
   useEffect(() => {
     void call(getExamInfo, { examId })
@@ -96,25 +100,14 @@ function ExamEntryPage() {
     return (
       <ExamRunner
         view={view}
-        onSubmitted={() => setPhase("submitted")}
-        onTimeout={() => setPhase("submitted")}
+        onSubmitted={() => { setSubmittedAttemptId(view.attempt.id); setPhase("submitted"); }}
+        onTimeout={() => { setSubmittedAttemptId(view.attempt.id); setPhase("submitted"); }}
       />
     );
   }
 
   if (phase === "submitted") {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-background">
-        <div className="max-w-md text-center">
-          <CheckCircle2 className="mx-auto size-16 text-green-500" />
-          <h1 className="mt-4 text-2xl font-bold">{t("exam.submitted")}</h1>
-          <p className="mt-2 text-muted-foreground">{t("result.pending")}</p>
-          <Button className="mt-6" onClick={() => void navigate({ to: "/dashboard" })}>
-            {t("nav.dashboard")}
-          </Button>
-        </div>
-      </div>
-    );
+    return <SubmittedScreen attemptId={submittedAttemptId} navigate={navigate} />;
   }
 
   return (
@@ -534,6 +527,249 @@ function ExamRunner({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Submitted / Result screen
+// ---------------------------------------------------------------------------
+
+function SubmittedScreen({
+  attemptId,
+  navigate,
+}: {
+  attemptId: string | null;
+  navigate: ReturnType<typeof useNavigate>;
+}) {
+  const call = useServerFn();
+  const [result, setResult] = useState<ResultView | { published: false } | null>(null);
+  const [loading, setLoading] = useState(true);
+  const { lang } = useI18n();
+
+  useEffect(() => {
+    if (!attemptId) { setLoading(false); return; }
+    const poll = async () => {
+      try {
+        const r = await call(getMyResult, { attemptId });
+        setResult(r as ResultView | { published: false });
+      } catch {
+        // not yet available
+      } finally {
+        setLoading(false);
+      }
+    };
+    void poll();
+    // Poll every 10s in case results are pending
+    const id = setInterval(() => { void poll(); }, 10000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [attemptId]);
+
+  const downloadResult = (r: ResultView) => {
+    const lines = [
+      "======================================",
+      "     OROMIA ACADEMY — EXAM RESULT     ",
+      "======================================",
+      `Exam      : ${r.examTitle}`,
+      `Date      : ${new Date(r.submittedAt ?? Date.now()).toLocaleString()}`,
+      "",
+      `Score     : ${r.score} / ${r.totalPoints}  (${r.percentage}%)`,
+      `Result    : ${r.passed ? "✅ PASSED" : "❌ FAILED"}`,
+      "",
+      `✓ Correct   : ${r.correctCount}`,
+      `✗ Wrong     : ${r.wrongCount}`,
+      `- Unanswered: ${r.unansweredCount}`,
+    ];
+
+    if (r.questionReview?.length) {
+      lines.push("", "--------------------------------------", "  QUESTION REVIEW", "--------------------------------------");
+      r.questionReview.forEach((q, i) => {
+        lines.push(``, `Q${i + 1}. ${q.textOm}`);
+        lines.push(`   Your answer: ${q.yourAnswer || "—"}`);
+        if (q.type === "mcq" || q.type === "truefalse") {
+          lines.push(`   Correct:     ${q.correctAnswer}`);
+        }
+        lines.push(`   Result: ${q.result.toUpperCase()} (${q.earned}/${q.points} pts)`);
+      });
+    }
+
+    lines.push("", "======================================");
+    const blob = new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `Result-${r.examTitle.replace(/\s+/g, "_")}-${(attemptId ?? "").slice(0, 8)}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background">
+        <div className="text-center space-y-4">
+          <div className="mx-auto size-16 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+          <p className="text-muted-foreground">Loading your result...</p>
+        </div>
+      </div>
+    );
+  }
+
+  const isPublished = result && "passed" in result;
+
+  return (
+    <div className="min-h-screen bg-background">
+      <SiteHeader />
+      <main className="mx-auto max-w-2xl px-4 py-12">
+        {/* Hero */}
+        <div className={cn(
+          "rounded-2xl p-8 text-center mb-6",
+          isPublished
+            ? ((result as ResultView).passed ? "bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800" : "bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800")
+            : "bg-muted border",
+        )}>
+          {isPublished ? (
+            <>
+              {(result as ResultView).passed ? (
+                <Trophy className="mx-auto size-16 text-green-500 mb-4" />
+              ) : (
+                <XCircle className="mx-auto size-16 text-red-500 mb-4" />
+              )}
+              <h1 className="text-2xl font-bold">
+                {(result as ResultView).passed ? "🎉 You Passed!" : "Better luck next time"}
+              </h1>
+              <p className="mt-1 text-4xl font-bold tabular-nums">
+                {(result as ResultView).percentage}%
+              </p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {(result as ResultView).score} / {(result as ResultView).totalPoints} points
+              </p>
+            </>
+          ) : (
+            <>
+              <CheckCircle2 className="mx-auto size-16 text-primary mb-4" />
+              <h1 className="text-2xl font-bold">Exam Submitted!</h1>
+              <p className="mt-2 text-muted-foreground">
+                Your exam has been received. Results will be published when the instructor is ready.
+              </p>
+            </>
+          )}
+        </div>
+
+        {/* Stats cards */}
+        {isPublished && (
+          <div className="grid grid-cols-3 gap-3 mb-6">
+            {[
+              { label: "Correct", value: (result as ResultView).correctCount, color: "text-green-600" },
+              { label: "Wrong", value: (result as ResultView).wrongCount, color: "text-red-600" },
+              { label: "Unanswered", value: (result as ResultView).unansweredCount, color: "text-yellow-600" },
+            ].map(({ label, value, color }) => (
+              <div key={label} className="rounded-xl border bg-card p-4 text-center">
+                <p className={cn("text-2xl font-bold", color)}>{value}</p>
+                <p className="text-xs text-muted-foreground mt-1">{label}</p>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Feedback */}
+        {isPublished && (result as ResultView).feedback && (
+          <div className="mb-6 rounded-xl border bg-card p-4">
+            <p className="text-sm font-semibold mb-1">Instructor Feedback</p>
+            <p className="text-sm text-muted-foreground">{(result as ResultView).feedback}</p>
+          </div>
+        )}
+
+        {/* Question review */}
+        {isPublished && (result as ResultView).questionReview?.length ? (
+          <div className="mb-6 space-y-3">
+            <h2 className="font-semibold text-base flex items-center gap-2">
+              <CheckCircle2 className="size-4 text-primary" />
+              Question Review
+            </h2>
+            {(result as ResultView).questionReview!.map((qr, i) => (
+              <div key={qr.questionId} className={cn(
+                "rounded-xl border p-4 space-y-2",
+                qr.result === "correct" ? "border-green-200 bg-green-50/50 dark:bg-green-950/10 dark:border-green-800" :
+                qr.result === "wrong" ? "border-red-200 bg-red-50/50 dark:bg-red-950/10 dark:border-red-800" :
+                qr.result === "partial" ? "border-amber-200 bg-amber-50/50 dark:bg-amber-950/10 dark:border-amber-800" :
+                "border-muted",
+              )}>
+                <div className="flex items-start gap-2">
+                  <span className="text-xs text-muted-foreground font-mono shrink-0 mt-1">Q{i + 1}.</span>
+                  <p className="text-sm font-medium flex-1">
+                    {lang === "om" ? qr.textOm : (qr.textEn ?? qr.textOm)}
+                  </p>
+                  <span className={cn("text-xs font-semibold shrink-0",
+                    qr.result === "correct" ? "text-green-600" :
+                    qr.result === "wrong" ? "text-red-600" :
+                    qr.result === "partial" ? "text-amber-600" : "text-muted-foreground",
+                  )}>
+                    {qr.earned}/{qr.points}pt
+                  </span>
+                </div>
+                {qr.type === "mcq" && qr.options.length > 0 && (
+                  <div className="ml-5 space-y-1">
+                    {qr.options.map((opt) => {
+                      const isYours = qr.yourAnswer === opt.id;
+                      const isCorrect = qr.correctAnswer === opt.id;
+                      return (
+                        <div key={opt.id} className={cn("flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm",
+                          isCorrect ? "bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 font-medium" :
+                          isYours ? "bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300" :
+                          "text-muted-foreground",
+                        )}>
+                          {isCorrect ? <CheckCircle2 className="size-3.5 text-green-600 shrink-0" /> :
+                           isYours ? <XCircle className="size-3.5 text-red-600 shrink-0" /> :
+                           <span className="size-3.5 shrink-0" />}
+                          {lang === "om" ? opt.textOm : (opt.textEn ?? opt.textOm)}
+                          {isYours && !isCorrect && <span className="ml-auto text-xs">← your answer</span>}
+                          {isCorrect && <span className="ml-auto text-xs">✓ correct</span>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                {qr.type === "truefalse" && (
+                  <div className="ml-5 flex gap-3 text-sm">
+                    {["true", "false"].map((v) => (
+                      <span key={v} className={cn("rounded-lg px-3 py-1 capitalize",
+                        qr.correctAnswer === v ? "bg-green-100 dark:bg-green-900/30 text-green-800 font-medium" :
+                        qr.yourAnswer === v ? "bg-red-100 dark:bg-red-900/30 text-red-800" : "bg-muted",
+                      )}>
+                        {v}
+                        {qr.correctAnswer === v && " ✓"}
+                        {qr.yourAnswer === v && qr.correctAnswer !== v && " ✗"}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {(qr.type === "short" || qr.type === "essay") && (
+                  <div className="ml-5 space-y-1.5 text-sm">
+                    <p><span className="text-muted-foreground">Your answer: </span>{qr.yourAnswer || "—"}</p>
+                    {qr.correctAnswer && <p><span className="text-muted-foreground">Expected: </span>{qr.correctAnswer}</p>}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : null}
+
+        {/* Actions */}
+        <div className="flex flex-wrap gap-3 justify-center">
+          {isPublished && (
+            <Button variant="outline" onClick={() => downloadResult(result as ResultView)}>
+              <Download className="size-4 mr-2" />
+              Download Result
+            </Button>
+          )}
+          <Button onClick={() => void navigate({ to: "/dashboard" })}>
+            Back to Dashboard
+          </Button>
+        </div>
+      </main>
     </div>
   );
 }

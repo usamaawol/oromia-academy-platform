@@ -45,7 +45,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useI18n, localized } from "@/i18n";
 import { useAuth } from "@/lib/auth";
-import { availableExams, myAttempts, getRankings } from "@/lib/server-fns";
+import { availableExams, myAttempts, getRankings, updateMyProfile } from "@/lib/server-fns";
 import { serverErrorMessage } from "@/lib/server-error";
 import { useServerFn } from "@/hooks/use-server-fn";
 import { saveUserProfile } from "@/lib/db";
@@ -90,7 +90,7 @@ function DashboardPage() {
   const [editingProfile, setEditingProfile] = useState(false);
   const [profileForm, setProfileForm] = useState({
     fullName: profile?.fullName ?? "",
-    phone: profile?.phone ?? "",
+    nickname: (profile as (typeof profile & { nickname?: string }))?.nickname ?? "",
     department: profile?.department ?? "",
   });
   const [passwordForm, setPasswordForm] = useState({
@@ -131,10 +131,10 @@ function DashboardPage() {
   const handleSaveProfile = async () => {
     try {
       if (!profile) return;
-      await saveUserProfile({
-        ...profile,
+      if (!profileForm.fullName.trim()) { toast.error("Full name is required"); return; }
+      await call(updateMyProfile, {
         fullName: profileForm.fullName,
-        phone: profileForm.phone,
+        nickname: profileForm.nickname,
         department: profileForm.department,
       });
       toast.success("Profile updated successfully");
@@ -176,34 +176,45 @@ function DashboardPage() {
   };
 
   const handleDownloadResult = (attempt: Attempt) => {
-    const content = `
-Exam Result - Oromia Academy
-=============================
-Student: ${attempt.studentName}
-Exam: ${attempt.examTitle}
-Attempt: #${attempt.attemptNumber}
-Date: ${new Date(attempt.submittedAt ?? Date.now()).toLocaleString()}
+    const lines: string[] = [
+      "======================================",
+      "       OROMIA ACADEMY — EXAM RESULT   ",
+      "======================================",
+      "",
+      `Student   : ${attempt.studentName}`,
+      `Exam      : ${attempt.examTitle}`,
+      `Attempt # : ${attempt.attemptNumber}`,
+      `Date      : ${new Date(attempt.submittedAt ?? Date.now()).toLocaleString()}`,
+      "",
+      "--------------------------------------",
+      "  SCORE SUMMARY",
+      "--------------------------------------",
+      `  Total Points : ${attempt.totalPoints}`,
+      `  Your Score   : ${attempt.autoScore + attempt.manualScore}`,
+      `  Percentage   : ${attempt.percentage}%`,
+      `  Result       : ${attempt.passed ? "✅ PASSED" : "❌ FAILED"}`,
+      "",
+      "  Breakdown:",
+      `  ✓ Correct    : ${attempt.correctCount}`,
+      `  ✗ Wrong      : ${attempt.wrongCount}`,
+      `  - Unanswered : ${attempt.unansweredCount}`,
+      "",
+      "--------------------------------------",
+      "  Oromia Academy — oromiaacademy.com  ",
+      "======================================",
+    ];
 
-Score: ${attempt.percentage}%
-Passed: ${attempt.passed ? "Yes" : "No"}
-Total Points: ${attempt.totalPoints}
-Score: ${attempt.autoScore + attempt.manualScore}
-Correct: ${attempt.correctCount}
-Wrong: ${attempt.wrongCount}
-Unanswered: ${attempt.unansweredCount}
-    `.trim();
-
-    const blob = new Blob([content], { type: "text/plain" });
+    const content = lines.join("\n");
+    const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `result-${attempt.examTitle}-${attempt.id}.txt`;
+    a.download = `OromiaAcademy-Result-${attempt.examTitle.replace(/\s+/g, "_")}-${attempt.id.slice(0, 8)}.txt`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   };
-
   return (
     <SidebarProvider>
       <div className="min-h-screen bg-background">
@@ -605,7 +616,7 @@ Unanswered: ${attempt.unansweredCount}
                       onClick={() => {
                         setProfileForm({
                           fullName: profile?.fullName ?? "",
-                          phone: profile?.phone ?? "",
+                          nickname: (profile as (typeof profile & { nickname?: string }))?.nickname ?? "",
                           department: profile?.department ?? "",
                         });
                         setEditingProfile(true);
@@ -625,6 +636,34 @@ Unanswered: ${attempt.unansweredCount}
                     </div>
                   )}
                 </div>
+
+                {/* Nickname setup prompt */}
+                {!(profile as (typeof profile & { nickname?: string }))?.nickname && !editingProfile && (
+                  <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/20 p-4 flex items-start gap-3">
+                    <span className="text-lg shrink-0">🎭</span>
+                    <div className="flex-1">
+                      <p className="font-semibold text-sm">Set your anonymous nickname</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Your nickname is shown on public exam leaderboards instead of your real name. It keeps your identity private while still showing your rank.
+                      </p>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setProfileForm({
+                          fullName: profile?.fullName ?? "",
+                          nickname: "",
+                          department: profile?.department ?? "",
+                        });
+                        setEditingProfile(true);
+                      }}
+                    >
+                      Set nickname
+                    </Button>
+                  </div>
+                )}
+
                 <Card className="mt-4">
                   <CardContent className="p-6">
                     <div className="grid gap-4">
@@ -644,23 +683,25 @@ Unanswered: ${attempt.unansweredCount}
                         )}
                       </div>
                       <div>
-                        <Label htmlFor="email">Email</Label>
-                        <p className="mt-1 text-sm text-muted-foreground">{profile?.email}</p>
-                      </div>
-                      <div>
-                        <Label htmlFor="phone">Phone</Label>
+                        <Label htmlFor="nickname">
+                          Anonymous Nickname{" "}
+                          <span className="text-xs text-muted-foreground font-normal">(shown on leaderboards)</span>
+                        </Label>
                         {editingProfile ? (
                           <Input
-                            id="phone"
-                            value={profileForm.phone}
+                            id="nickname"
+                            value={profileForm.nickname}
+                            placeholder="e.g. StarCoder99, TechWiz, ProLearner"
                             onChange={(e) =>
-                              setProfileForm({ ...profileForm, phone: e.target.value })
+                              setProfileForm({ ...profileForm, nickname: e.target.value })
                             }
                             className="mt-1"
                           />
                         ) : (
                           <p className="mt-1 text-sm text-muted-foreground">
-                            {profile?.phone || "Not set"}
+                            {(profile as (typeof profile & { nickname?: string }))?.nickname || (
+                              <span className="italic text-amber-600">Not set — your rank will show as &quot;StudentXXX&quot;</span>
+                            )}
                           </p>
                         )}
                       </div>
@@ -680,6 +721,11 @@ Unanswered: ${attempt.unansweredCount}
                             {profile?.department || "Not set"}
                           </p>
                         )}
+                      </div>
+                      <div>
+                        <Label>Email</Label>
+                        <p className="mt-1 text-sm text-muted-foreground">{profile?.email}</p>
+                        <p className="text-xs text-muted-foreground/60">Email cannot be changed</p>
                       </div>
                       <div>
                         <Label>Role</Label>

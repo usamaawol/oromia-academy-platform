@@ -1,7 +1,7 @@
 /**
  * Admin — Courses management
  */
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useSearch } from "@tanstack/react-router";
 import { Pencil, Plus, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -28,6 +28,9 @@ import { useServerFn } from "@/hooks/use-server-fn";
 import type { Course } from "@/lib/schema";
 
 export const Route = createFileRoute("/_admin/admin/courses")({
+  validateSearch: (s: Record<string, unknown>) => ({
+    new: s.new === "1" ? "1" : undefined,
+  }),
   component: CoursesPage,
 });
 
@@ -46,6 +49,7 @@ const BLANK_COURSE: Course = {
 function CoursesPage() {
   const { t } = useI18n();
   const call = useServerFn();
+  const search = useSearch({ from: "/_admin/admin/courses" });
 
   const [courses, setCourses] = useState<Course[]>([]);
   const [loading, setLoading] = useState(true);
@@ -68,6 +72,14 @@ function CoursesPage() {
   useEffect(() => {
     void refresh();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-open new dialog when ?new=1 is in the URL
+  useEffect(() => {
+    if (search.new === "1" && !loading) {
+      openNew();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search.new, loading]);
 
   function openNew() {
     setEditing({ ...BLANK_COURSE, id: crypto.randomUUID() });

@@ -1,8 +1,8 @@
 /**
  * Admin — Question bank
  */
-import { createFileRoute } from "@tanstack/react-router";
-import { CheckCircle2, Pencil, Plus, Trash2, XCircle } from "lucide-react";
+import { createFileRoute, useSearch } from "@tanstack/react-router";
+import { CheckCircle2, Pencil, Plus, Sparkles, Trash2, XCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
@@ -19,7 +19,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { useI18n, type TranslationKey } from "@/i18n";
 import {
@@ -27,6 +26,7 @@ import {
   adminListQuestions,
   adminSaveQuestion,
   adminDeleteQuestion,
+  adminSaveCourse,
 } from "@/lib/server-fns";
 import { serverErrorMessage } from "@/lib/server-error";
 import { useServerFn } from "@/hooks/use-server-fn";
@@ -34,6 +34,9 @@ import type { Course, Question, QuestionOption, QuestionType, Difficulty } from 
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_admin/admin/questions")({
+  validateSearch: (s: Record<string, unknown>): { new?: string } => ({
+    ...(s["new"] === "1" ? { new: "1" as const } : {}),
+  }),
   component: QuestionsPage,
 });
 
@@ -60,9 +63,14 @@ const BLANK: Question = {
   approved: false,
 };
 
+// ---------------------------------------------------------------------------
+// Page
+// ---------------------------------------------------------------------------
+
 function QuestionsPage() {
   const { t } = useI18n();
   const call = useServerFn();
+  const search = useSearch({ from: "/_admin/admin/questions" });
 
   const [questions, setQuestions] = useState<Question[]>([]);
   const [courses, setCourses] = useState<Course[]>([]);
@@ -71,6 +79,7 @@ function QuestionsPage() {
   const [typeFilter, setTypeFilter] = useState("all");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Question>({ ...BLANK });
+  const [courseInput, setCourseInput] = useState("");
   const [saving, setSaving] = useState(false);
 
   const refresh = async () => {
@@ -93,6 +102,12 @@ function QuestionsPage() {
     void refresh();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  useEffect(() => {
+    const newParam = (search as Record<string, string | undefined>)["new"];
+    if (newParam === "1" && !loading) openNew();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading]);
+
   const filtered = questions.filter((q) => {
     if (courseFilter !== "all" && q.courseId !== courseFilter) return false;
     if (typeFilter !== "all" && q.type !== typeFilter) return false;
@@ -105,30 +120,58 @@ function QuestionsPage() {
       id: crypto.randomUUID(),
       options: [BLANK_OPT(), BLANK_OPT(), BLANK_OPT(), BLANK_OPT()],
     });
+    setCourseInput("");
     setDialogOpen(true);
   }
 
   function openEdit(q: Question) {
     setEditing({ ...q, options: q.options.length > 0 ? q.options : [BLANK_OPT(), BLANK_OPT()] });
+    const existing = courses.find((c) => c.id === q.courseId);
+    setCourseInput(existing?.titleOm || existing?.titleEn || "");
     setDialogOpen(true);
   }
 
   async function save() {
-    if (!editing.textOm.trim()) {
-      toast.error("Question text (Oromoo) required");
-      return;
+    const courseName = courseInput.trim();
+    if (!courseName) { toast.error("Maqaa koorsii galchi"); return; }
+    if (!editing.textOm.trim()) { toast.error("Gaaffii (Afaan Oromoo) barreessi"); return; }
+    if (editing.type === "mcq" && !editing.correctOptionId) { toast.error("Deebii sirrii filadhu"); return; }
+    if (editing.type === "mcq" && editing.options.some((o) => !o.textOm.trim())) {
+      toast.error("Filannoolee hunda guuti"); return;
     }
-    if (!editing.courseId) {
-      toast.error("Select a course");
-      return;
-    }
-    if (editing.type === "mcq" && !editing.correctOptionId) {
-      toast.error("Select correct answer");
-      return;
-    }
+
     setSaving(true);
     try {
-      await call(adminSaveQuestion, { question: editing });
+      let courseId = editing.courseId;
+      const match = courses.find(
+        (c) =>
+          c.titleOm.toLowerCase() === courseName.toLowerCase() ||
+          c.titleEn.toLowerCase() === courseName.toLowerCase(),
+      );
+
+      if (match) {
+        courseId = match.id;
+      } else {
+        const newId = crypto.randomUUID();
+        await call(adminSaveCourse, {
+          course: {
+            id: newId,
+            titleOm: courseName,
+            titleEn: courseName,
+            descOm: "",
+            descEn: "",
+            icon: "sparkles",
+            level: "medium",
+            status: "active",
+            order: courses.length,
+          },
+        });
+        courseId = newId;
+        const freshCourses = await call(adminListCourses, undefined);
+        setCourses(freshCourses as Course[]);
+      }
+
+      await call(adminSaveQuestion, { question: { ...editing, courseId, approved: true } });
       toast.success(t("common.success"));
       setDialogOpen(false);
       await refresh();
@@ -159,15 +202,26 @@ function QuestionsPage() {
     }
   }
 
-  const courseName = (id: string) => courses.find((c) => c.id === id)?.titleEn ?? id;
+  const cName = (id: string) => {
+    const c = courses.find((x) => x.id === id);
+    return c?.titleOm || c?.titleEn || id;
+  };
 
   return (
     <div>
       <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-2xl font-bold">{t("admin.questions")}</h1>
-        <Button size="sm" onClick={openNew}>
-          <Plus className="size-4 mr-1" /> {t("admin.newQuestion")}
-        </Button>
+        <div className="flex gap-2">
+          <Button asChild variant="outline" size="sm">
+            <a href="/admin/ai-import">
+              <Sparkles className="size-4 mr-1.5" />
+              AI'n Galchi
+            </a>
+          </Button>
+          <Button size="sm" onClick={openNew}>
+            <Plus className="size-4 mr-1" /> {t("admin.newQuestion")}
+          </Button>
+        </div>
       </div>
 
       {/* Filters */}
@@ -177,19 +231,15 @@ function QuestionsPage() {
             <SelectValue placeholder={t("common.course")} />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">
-              {t("common.all")} {t("common.courses")}
-            </SelectItem>
+            <SelectItem value="all">{t("common.all")} {t("common.courses")}</SelectItem>
             {courses.map((c) => (
-              <SelectItem key={c.id} value={c.id}>
-                {c.titleEn}
-              </SelectItem>
+              <SelectItem key={c.id} value={c.id}>{c.titleOm || c.titleEn}</SelectItem>
             ))}
           </SelectContent>
         </Select>
         <Select value={typeFilter} onValueChange={setTypeFilter}>
           <SelectTrigger className="w-40">
-            <SelectValue placeholder="Type" />
+            <SelectValue placeholder="Gosa" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">{t("common.all")}</SelectItem>
@@ -200,10 +250,11 @@ function QuestionsPage() {
           </SelectContent>
         </Select>
         <span className="self-center text-sm text-muted-foreground">
-          {filtered.length} {t("common.questions")}
+          {filtered.length} gaaffii
         </span>
       </div>
 
+      {/* Question list */}
       {loading ? (
         <div className="space-y-3">
           {Array.from({ length: 4 }).map((_, i) => (
@@ -211,41 +262,30 @@ function QuestionsPage() {
           ))}
         </div>
       ) : (
-        <div className="divide-y rounded-lg border">
+        <div className="divide-y rounded-xl border">
           {filtered.map((q) => (
             <div key={q.id} className="flex items-start gap-3 p-4 hover:bg-muted/30">
               <div className="flex-1 min-w-0">
                 <p className="font-medium line-clamp-2">{q.textOm}</p>
                 <div className="mt-1.5 flex flex-wrap gap-1.5">
-                  <Badge variant="outline" className="text-xs">
-                    {courseName(q.courseId)}
-                  </Badge>
-                  <Badge variant="secondary" className="text-xs capitalize">
-                    {q.type}
-                  </Badge>
-                  <Badge variant="outline" className="text-xs capitalize">
-                    {q.difficulty}
-                  </Badge>
+                  <Badge variant="outline" className="text-xs">{cName(q.courseId)}</Badge>
+                  <Badge variant="secondary" className="text-xs capitalize">{q.type}</Badge>
+                  <Badge variant="outline" className="text-xs capitalize">{q.difficulty}</Badge>
                   <Badge variant={q.approved ? "default" : "secondary"} className="text-xs">
                     {q.approved ? t("admin.approved") : t("admin.pendingReview")}
                   </Badge>
-                  <span className="text-xs text-muted-foreground">
-                    {q.points} {t("common.points")}
-                  </span>
+                  <span className="text-xs text-muted-foreground">{q.points} pt</span>
                 </div>
               </div>
               <div className="flex items-center gap-1 shrink-0">
                 <Button
-                  variant="ghost"
-                  size="icon"
+                  variant="ghost" size="icon"
                   onClick={() => void toggleApprove(q)}
                   title={q.approved ? "Unapprove" : "Approve"}
                 >
-                  {q.approved ? (
-                    <CheckCircle2 className="size-4 text-green-500" />
-                  ) : (
-                    <XCircle className="size-4 text-muted-foreground" />
-                  )}
+                  {q.approved
+                    ? <CheckCircle2 className="size-4 text-green-500" />
+                    : <XCircle className="size-4 text-muted-foreground" />}
                 </Button>
                 <Button variant="ghost" size="icon" onClick={() => openEdit(q)}>
                   <Pencil className="size-4" />
@@ -262,15 +302,21 @@ function QuestionsPage() {
         </div>
       )}
 
-      {/* Question Dialog */}
+      {/* Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
-            <DialogTitle>{t("admin.newQuestion")}</DialogTitle>
+            <DialogTitle>
+              {editing.id && questions.some((q) => q.id === editing.id)
+                ? "Gaaffii gulaali"
+                : t("admin.newQuestion")}
+            </DialogTitle>
           </DialogHeader>
           <QuestionForm
             q={editing}
             courses={courses}
+            courseInput={courseInput}
+            onCourseChange={setCourseInput}
             onChange={setEditing}
             onSave={() => void save()}
             onCancel={() => setDialogOpen(false)}
@@ -283,9 +329,15 @@ function QuestionsPage() {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Form
+// ---------------------------------------------------------------------------
+
 function QuestionForm({
   q,
   courses,
+  courseInput,
+  onCourseChange,
   onChange,
   onSave,
   onCancel,
@@ -294,6 +346,8 @@ function QuestionForm({
 }: {
   q: Question;
   courses: Course[];
+  courseInput: string;
+  onCourseChange: (v: string) => void;
   onChange: (q: Question) => void;
   onSave: () => void;
   onCancel: () => void;
@@ -301,38 +355,94 @@ function QuestionForm({
   t: (k: TranslationKey, vars?: Record<string, string | number>) => string;
 }) {
   const set = <K extends keyof Question>(k: K, v: Question[K]) => onChange({ ...q, [k]: v });
+  const [showSuggestions, setShowSuggestions] = useState(false);
+
+  const suggestions = courseInput.trim()
+    ? courses.filter(
+        (c) =>
+          c.titleOm.toLowerCase().includes(courseInput.toLowerCase()) ||
+          c.titleEn.toLowerCase().includes(courseInput.toLowerCase()),
+      )
+    : courses.slice(0, 6);
+
+  const isNewCourse =
+    courseInput.trim().length > 0 &&
+    !courses.some(
+      (c) =>
+        c.titleOm.toLowerCase() === courseInput.trim().toLowerCase() ||
+        c.titleEn.toLowerCase() === courseInput.trim().toLowerCase(),
+    );
 
   return (
     <div className="space-y-4">
+      {/* Course (free text) + Topic */}
       <div className="grid grid-cols-2 gap-3">
-        <div className="space-y-1.5">
-          <Label>{t("common.course")} *</Label>
-          <Select value={q.courseId} onValueChange={(v) => set("courseId", v)}>
-            <SelectTrigger>
-              <SelectValue placeholder="Select course" />
-            </SelectTrigger>
-            <SelectContent>
-              {courses.map((c) => (
-                <SelectItem key={c.id} value={c.id}>
-                  {c.titleEn}
-                </SelectItem>
+        <div className="relative space-y-1.5">
+          <Label>
+            Koorsii <span className="text-destructive">*</span>
+          </Label>
+          <div className="relative">
+            <Input
+              placeholder="Maqaa koorsii barreessi..."
+              value={courseInput}
+              autoComplete="off"
+              onChange={(e) => { onCourseChange(e.target.value); setShowSuggestions(true); }}
+              onFocus={() => setShowSuggestions(true)}
+              onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
+            />
+            {courseInput.trim() && (
+              <span className={cn(
+                "absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-bold px-1.5 py-0.5 rounded pointer-events-none",
+                isNewCourse
+                  ? "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300"
+                  : "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300",
+              )}>
+                {isNewCourse ? "haaraa ✦" : "✓ jira"}
+              </span>
+            )}
+          </div>
+          {/* Suggestions dropdown */}
+          {showSuggestions && (suggestions.length > 0 || isNewCourse) && (
+            <div className="absolute z-50 left-0 right-0 top-full mt-1 rounded-xl border bg-popover shadow-lg overflow-hidden">
+              {suggestions.map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  onMouseDown={() => { onCourseChange(c.titleOm || c.titleEn); setShowSuggestions(false); }}
+                  className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-left hover:bg-accent transition-colors"
+                >
+                  <span className="flex-1 font-medium">{c.titleOm || c.titleEn}</span>
+                  {c.titleEn && c.titleOm && c.titleEn !== c.titleOm && (
+                    <span className="text-xs text-muted-foreground shrink-0">{c.titleEn}</span>
+                  )}
+                </button>
               ))}
-            </SelectContent>
-          </Select>
+              {isNewCourse && (
+                <div className="px-3 py-2 border-t bg-amber-50/50 dark:bg-amber-950/20 text-xs text-amber-700 dark:text-amber-400 flex items-center gap-1.5">
+                  <Plus className="size-3 shrink-0" />
+                  <span>"{courseInput.trim()}" — koorsii haaraa uumama</span>
+                </div>
+              )}
+            </div>
+          )}
         </div>
+
         <div className="space-y-1.5">
           <Label>{t("admin.topic")}</Label>
-          <Input value={q.topic} onChange={(e) => set("topic", e.target.value)} />
+          <Input
+            placeholder="Mata duree (fakk. Boqonnaa 3)"
+            value={q.topic}
+            onChange={(e) => set("topic", e.target.value)}
+          />
         </div>
       </div>
 
+      {/* Type + Difficulty + Points */}
       <div className="grid grid-cols-3 gap-3">
         <div className="space-y-1.5">
-          <Label>Type</Label>
+          <Label>Gosa gaaffii</Label>
           <Select value={q.type} onValueChange={(v: QuestionType) => set("type", v)}>
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
+            <SelectTrigger><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="mcq">{t("qtype.mcq")}</SelectItem>
               <SelectItem value="truefalse">{t("qtype.truefalse")}</SelectItem>
@@ -344,9 +454,7 @@ function QuestionForm({
         <div className="space-y-1.5">
           <Label>{t("admin.difficulty")}</Label>
           <Select value={q.difficulty} onValueChange={(v: Difficulty) => set("difficulty", v)}>
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
+            <SelectTrigger><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="easy">{t("difficulty.easy")}</SelectItem>
               <SelectItem value="medium">{t("difficulty.medium")}</SelectItem>
@@ -357,130 +465,156 @@ function QuestionForm({
         <div className="space-y-1.5">
           <Label>{t("common.points")}</Label>
           <Input
-            type="number"
-            min={1}
+            type="number" min={1}
             value={q.points}
             onChange={(e) => set("points", Number(e.target.value))}
           />
         </div>
       </div>
 
+      {/* Question — Afaan Oromoo only */}
       <div className="space-y-1.5">
-        <Label>Question (Afaan Oromoo) *</Label>
-        <Textarea value={q.textOm} onChange={(e) => set("textOm", e.target.value)} rows={3} />
-      </div>
-      <div className="space-y-1.5">
-        <Label>Question (English)</Label>
-        <Textarea value={q.textEn ?? ""} onChange={(e) => set("textEn", e.target.value)} rows={2} />
+        <Label>
+          Gaaffii (Afaan Oromoo) <span className="text-destructive">*</span>
+        </Label>
+        <Textarea
+          placeholder="Gaaffii kee asitti barreessi..."
+          value={q.textOm}
+          onChange={(e) => set("textOm", e.target.value)}
+          rows={3}
+          className="resize-y"
+        />
       </div>
 
       {/* MCQ options */}
       {q.type === "mcq" && (
-        <div className="space-y-3">
-          <Label>{t("common.answer")} options (select correct)</Label>
-          {q.options.map((opt, i) => (
-            <div
-              key={opt.id}
-              className={cn(
-                "flex gap-2 rounded-lg border p-3",
-                q.correctOptionId === opt.id && "border-green-400 bg-green-50 dark:bg-green-950",
-              )}
+        <div className="space-y-2">
+          <Label>
+            Filannoolee deebii{" "}
+            <span className="text-xs text-muted-foreground font-normal">(deebii sirrii filadhu)</span>
+          </Label>
+          <div className="space-y-2">
+            {q.options.map((opt, i) => {
+              const isCorrect = q.correctOptionId === opt.id;
+              return (
+                <div
+                  key={opt.id}
+                  className={cn(
+                    "flex items-center gap-3 rounded-xl border px-3 py-2.5 transition-colors",
+                    isCorrect
+                      ? "border-green-400 bg-green-50 dark:border-green-600 dark:bg-green-950/30"
+                      : "border-border hover:border-primary/40",
+                  )}
+                >
+                  <button
+                    type="button"
+                    onClick={() => set("correctOptionId", opt.id)}
+                    className={cn(
+                      "grid size-5 shrink-0 place-items-center rounded-full border-2 transition-colors",
+                      isCorrect
+                        ? "border-green-500 bg-green-500"
+                        : "border-muted-foreground/40 hover:border-primary",
+                    )}
+                  >
+                    {isCorrect && <span className="size-2 rounded-full bg-white" />}
+                  </button>
+                  <span className={cn(
+                    "shrink-0 text-sm font-bold w-5 text-center",
+                    isCorrect ? "text-green-700 dark:text-green-400" : "text-muted-foreground",
+                  )}>
+                    {String.fromCharCode(65 + i)}.
+                  </span>
+                  <Input
+                    placeholder={`Filannoo ${i + 1}`}
+                    value={opt.textOm}
+                    onChange={(e) => {
+                      set("options", q.options.map((o) =>
+                        o.id === opt.id ? { ...o, textOm: e.target.value } : o,
+                      ));
+                    }}
+                    className="flex-1 border-0 bg-transparent p-0 text-sm shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
+                  />
+                  {q.options.length > 2 && (
+                    <Button
+                      variant="ghost" size="icon"
+                      className="size-7 shrink-0 text-muted-foreground/50 hover:text-destructive"
+                      onClick={() => set("options", q.options.filter((o) => o.id !== opt.id))}
+                    >
+                      <Trash2 className="size-3.5" />
+                    </Button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          {q.options.length < 6 && (
+            <Button
+              variant="outline" size="sm"
+              className="w-full gap-1.5 border-dashed"
+              onClick={() => set("options", [...q.options, BLANK_OPT()])}
             >
-              <input
-                type="radio"
-                name="correct"
-                checked={q.correctOptionId === opt.id}
-                onChange={() => set("correctOptionId", opt.id)}
-                className="mt-1 shrink-0"
-              />
-              <div className="flex-1 space-y-1.5">
-                <Input
-                  placeholder={`Option ${i + 1} (Oromoo)`}
-                  value={opt.textOm}
-                  onChange={(e) => {
-                    const opts = q.options.map((o) =>
-                      o.id === opt.id ? { ...o, textOm: e.target.value } : o,
-                    );
-                    set("options", opts);
-                  }}
-                />
-                <Input
-                  placeholder={`Option ${i + 1} (English)`}
-                  value={opt.textEn ?? ""}
-                  onChange={(e) => {
-                    const opts = q.options.map((o) =>
-                      o.id === opt.id ? { ...o, textEn: e.target.value } : o,
-                    );
-                    set("options", opts);
-                  }}
-                />
-              </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() =>
-                  set(
-                    "options",
-                    q.options.filter((o) => o.id !== opt.id),
-                  )
-                }
-              >
-                <Trash2 className="size-4 text-muted-foreground" />
-              </Button>
-            </div>
-          ))}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => set("options", [...q.options, BLANK_OPT()])}
-          >
-            <Plus className="size-4 mr-1" /> Add option
-          </Button>
+              <Plus className="size-3.5" /> Filannoo dabaluu
+            </Button>
+          )}
+          {!q.correctOptionId && (
+            <p className="text-xs text-amber-600 dark:text-amber-400">
+              ⚠ Deebii sirrii filuu hin dagatin
+            </p>
+          )}
         </div>
       )}
 
       {/* True/False */}
       {q.type === "truefalse" && (
         <div className="space-y-1.5">
-          <Label>Correct answer</Label>
-          <Select
-            value={q.correctBool === true ? "true" : q.correctBool === false ? "false" : ""}
-            onValueChange={(v) => set("correctBool", v === "true")}
-          >
-            <SelectTrigger>
-              <SelectValue placeholder="Select" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="true">{t("exam.true")}</SelectItem>
-              <SelectItem value="false">{t("exam.false")}</SelectItem>
-            </SelectContent>
-          </Select>
+          <Label>Deebii sirrii</Label>
+          <div className="flex gap-3">
+            {[
+              { value: "true",  label: "✅ Dhugaa" },
+              { value: "false", label: "❌ Soba"   },
+            ].map(({ value, label }) => {
+              const selected =
+                (value === "true"  && q.correctBool === true) ||
+                (value === "false" && q.correctBool === false);
+              return (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => set("correctBool", value === "true")}
+                  className={cn(
+                    "flex-1 rounded-xl border-2 py-3 text-sm font-semibold transition-all",
+                    selected
+                      ? "border-primary bg-primary/10 text-primary"
+                      : "border-border hover:border-primary/40",
+                  )}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
         </div>
       )}
 
-      {/* Short/Essay */}
+      {/* Short / Essay */}
       {(q.type === "short" || q.type === "essay") && (
-        <>
-          <div className="space-y-1.5">
-            <Label>Expected answer / rubric</Label>
-            <Textarea
-              value={q.rubric ?? ""}
-              onChange={(e) => set("rubric", e.target.value)}
-              rows={3}
-            />
-          </div>
-        </>
+        <div className="space-y-1.5">
+          <Label>
+            Deebii eegamu{" "}
+            <span className="text-xs text-muted-foreground font-normal">(barsiisaaf qofa)</span>
+          </Label>
+          <Textarea
+            placeholder="Deebii sirrii ykn yaada sakatta'iinsaaf..."
+            value={q.rubric ?? ""}
+            onChange={(e) => set("rubric", e.target.value)}
+            rows={3}
+          />
+        </div>
       )}
 
-      <div className="flex items-center gap-2">
-        <Switch id="approved" checked={q.approved} onCheckedChange={(v) => set("approved", v)} />
-        <Label htmlFor="approved">{t("admin.approved")}</Label>
-      </div>
-
-      <div className="flex justify-end gap-2 pt-2">
-        <Button variant="outline" onClick={onCancel}>
-          {t("common.cancel")}
-        </Button>
+      {/* Actions */}
+      <div className="flex justify-end gap-2 pt-2 border-t">
+        <Button variant="outline" onClick={onCancel}>{t("common.cancel")}</Button>
         <Button onClick={onSave} disabled={saving}>
           {saving ? t("common.saving") : t("common.save")}
         </Button>

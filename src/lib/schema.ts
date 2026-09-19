@@ -17,6 +17,7 @@ export type Profile = {
   email: string;
   phone?: string;
   department?: string;
+  nickname?: string; // anonymous display name for leaderboards
   role: Role;
   courseIds: string[];
   status: "active" | "suspended";
@@ -101,6 +102,8 @@ export type Exam = {
   resultsPublishAt: number | null;
   status: ExamStatus;
   hasPassword?: boolean;
+  showAnswersAfter?: boolean; // show correct/wrong after result published
+  anonymous?: boolean;       // show leaderboard with nicknames only
   createdAt?: number;
   updatedAt?: number;
 };
@@ -141,6 +144,8 @@ export type Attempt = {
   published: boolean;
   publishedAt?: number | null;
   gradedAt?: number | null;
+  // per-question breakdown, set on submit (server-only, stripped before publish)
+  questionResults?: Record<string, "correct" | "wrong" | "partial" | "unanswered">;
 };
 
 /** The live exam payload a student receives — no answer keys, ever. */
@@ -176,6 +181,19 @@ export type ResultView = {
   unansweredCount: number;
   needsManualGrading: boolean;
   feedback?: string;
+  // per-question review (only if exam.showAnswersAfter is true)
+  questionReview?: Array<{
+    questionId: string;
+    textOm: string;
+    textEn?: string;
+    type: string;
+    yourAnswer: string;
+    correctAnswer: string;
+    result: "correct" | "wrong" | "partial" | "unanswered";
+    points: number;
+    earned: number;
+    options: Array<{ id: string; textOm: string; textEn?: string }>;
+  }>;
 };
 
 export type AppNotification = {

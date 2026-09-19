@@ -67,6 +67,8 @@ const ExamSchema = z.object({
   resultsPublishAt: z.number().nullable(),
   status: z.enum(["draft", "active", "closed", "archived"]),
   hasPassword: z.boolean().optional(),
+  showAnswersAfter: z.boolean().optional(),
+  anonymous: z.boolean().optional(),
 });
 
 const QuestionSchema = z.object({
@@ -408,6 +410,58 @@ export const getMyResult = createServerFn({ method: "GET" })
     if (attempt.studentId !== profile.id) throw new AppError("auth/forbidden");
     if (!attempt.published) return { published: false };
 
+    const exam = await fsGet<Exam>("exams", attempt.examId);
+
+    // Build question review if exam allows showing answers
+    let questionReview: ResultView["questionReview"] | undefined;
+    if (exam?.showAnswersAfter) {
+      const questionDocs = await Promise.all(
+        attempt.questionOrder.map((id) => fsGet<Question>("questions", id)),
+      );
+      const valid = questionDocs.filter((q): q is Question => q !== null);
+      const answers = attempt.answers ?? {};
+
+      questionReview = attempt.questionOrder.map((qid) => {
+        const q = valid.find((x) => x.id === qid);
+        if (!q) return null;
+        const yourAnswer = answers[qid] ?? "";
+        let correctAnswer = "";
+        let result: "correct" | "wrong" | "partial" | "unanswered" = "unanswered";
+        let earned = 0;
+
+        if (q.type === "mcq") {
+          correctAnswer = q.correctOptionId ?? "";
+          if (!yourAnswer) { result = "unanswered"; }
+          else if (yourAnswer === q.correctOptionId) { result = "correct"; earned = q.points; }
+          else { result = "wrong"; }
+        } else if (q.type === "truefalse") {
+          correctAnswer = q.correctBool === true ? "true" : "false";
+          if (!yourAnswer) { result = "unanswered"; }
+          else if (yourAnswer === correctAnswer) { result = "correct"; earned = q.points; }
+          else { result = "wrong"; }
+        } else {
+          // short/essay — use manual grades if available
+          const mg = attempt.manualGrades?.[qid];
+          if (!yourAnswer) { result = "unanswered"; }
+          else if (mg) { earned = mg.points; result = mg.points >= q.points ? "correct" : mg.points > 0 ? "partial" : "wrong"; }
+          else { result = "unanswered"; correctAnswer = q.expectedAnswer ?? ""; }
+        }
+
+        return {
+          questionId: qid,
+          textOm: q.textOm,
+          textEn: q.textEn,
+          type: q.type,
+          yourAnswer,
+          correctAnswer,
+          result,
+          points: q.points,
+          earned,
+          options: q.options,
+        };
+      }).filter(Boolean) as NonNullable<ResultView["questionReview"]>;
+    }
+
     return {
       attemptId: attempt.id,
       examId: attempt.examId,
@@ -422,6 +476,7 @@ export const getMyResult = createServerFn({ method: "GET" })
       unansweredCount: attempt.unansweredCount,
       needsManualGrading: attempt.needsManualGrading,
       ...(attempt.feedback ? { feedback: attempt.feedback } : {}),
+      ...(questionReview ? { questionReview } : {}),
     };
   });
 
@@ -879,6 +934,7 @@ export const updateMyProfile = createServerFn({ method: "POST" })
       fullName: z.string().optional(),
       phone: z.string().optional(),
       department: z.string().optional(),
+      nickname: z.string().optional(),
     }),
   )
   .handler(async ({ data }): Promise<void> => {
@@ -888,6 +944,7 @@ export const updateMyProfile = createServerFn({ method: "POST" })
     if (data.fullName !== undefined) updates["fullName"] = data.fullName;
     if (data.phone !== undefined) updates["phone"] = data.phone;
     if (data.department !== undefined) updates["department"] = data.department;
+    if (data.nickname !== undefined) updates["nickname"] = data.nickname;
     await fsSet("users", profile.id, updates);
   });
 
@@ -1036,6 +1093,49 @@ export const getRankings = createServerFn({ method: "GET" }).handler(async () =>
 });
 
 // ---------------------------------------------------------------------------
+// LEADERBOARD — per-exam anonymous rankings
+// ---------------------------------------------------------------------------
+
+export const getExamLeaderboard = createServerFn({ method: "GET" })
+  .validator(z.object({ examId: z.string() }))
+  .handler(async ({ data }) => {
+    const idToken = getToken();
+    await requireProfile(idToken);
+
+    const [attempts, users] = await Promise.all([
+      fsQuery<Attempt>("examAttempts", [["examId", "EQUAL", data.examId]]),
+      fsList<Profile>("users"),
+    ]);
+
+    const graded = attempts.filter((a) => a.status === "graded" && a.published);
+    const userMap = new Map(users.map((u) => [u.id, u]));
+
+    // Best attempt per student
+    const bestByStudent = new Map<string, Attempt>();
+    for (const a of graded) {
+      const prev = bestByStudent.get(a.studentId);
+      if (!prev || a.percentage > prev.percentage) bestByStudent.set(a.studentId, a);
+    }
+
+    const ranked = [...bestByStudent.values()]
+      .sort((a, b) => b.percentage - a.percentage)
+      .map((a, idx) => {
+        const user = userMap.get(a.studentId);
+        const nickname = user?.nickname || `Student${(idx + 1).toString().padStart(3, "0")}`;
+        return {
+          rank: idx + 1,
+          nickname,
+          percentage: a.percentage,
+          passed: a.passed,
+          score: a.autoScore + a.manualScore,
+          totalPoints: a.totalPoints,
+        };
+      });
+
+    return ranked;
+  });
+
+// ---------------------------------------------------------------------------
 // DIAGNOSTICS — server configuration health (staff only)
 // ---------------------------------------------------------------------------
 
@@ -1043,3 +1143,89 @@ export const adminDiagnostics = createServerFn({ method: "GET" }).handler(async 
   await requireStaff(getToken());
   return systemDiagnostics();
 });
+
+// ---------------------------------------------------------------------------
+// AI IMPORT — extract questions from pasted text (server-side, uses OpenRouter)
+// ---------------------------------------------------------------------------
+
+export const adminAiExtractQuestions = createServerFn({ method: "POST" })
+  .validator(z.object({ text: z.string().min(10) }))
+  .handler(async ({ data }) => {
+    const idToken = getToken();
+    await requireStaff(idToken);
+
+    const apiKey =
+      process.env["OPENROUTER_API_KEY"] ??
+      process.env["VITE_OPENROUTER_API_KEY"] ??
+      "";
+
+    if (!apiKey) {
+      throw new Error(
+        "OPENROUTER_API_KEY is not configured. Add it to your .env file.",
+      );
+    }
+
+    // Dynamic import keeps ai-import.server.ts out of the client bundle
+    const { aiExtractQuestions } = await import("./ai-import.server");
+    return aiExtractQuestions(data.text, apiKey);
+  });
+
+// ---------------------------------------------------------------------------
+// AI IMPORT — bulk save approved extracted questions to Question Bank
+// ---------------------------------------------------------------------------
+
+const AiQuestionSchema = z.object({
+  id: z.string(),
+  courseId: z.string(),
+  topic: z.string(),
+  type: z.enum(["mcq", "truefalse", "short", "essay"]),
+  language: z.enum(["om", "en", "both"]),
+  difficulty: z.enum(["easy", "medium", "hard"]),
+  textOm: z.string(),
+  textEn: z.string().optional(),
+  options: z.array(
+    z.object({ id: z.string(), textOm: z.string(), textEn: z.string().optional() }),
+  ),
+  correctOptionId: z.string().optional(),
+  correctBool: z.boolean().optional(),
+  expectedAnswer: z.string().optional(),
+  rubric: z.string().optional(),
+  explanationOm: z.string().optional(),
+  explanationEn: z.string().optional(),
+  points: z.number(),
+  tags: z.array(z.string()),
+  approved: z.boolean(),
+});
+
+export const adminBulkSaveQuestions = createServerFn({ method: "POST" })
+  .validator(z.object({ questions: z.array(AiQuestionSchema) }))
+  .handler(async ({ data }): Promise<{ saved: number; ids: string[] }> => {
+    const idToken = getToken();
+    const actor = await requireStaff(idToken);
+
+    const ids: string[] = [];
+    for (const q of data.questions) {
+      const isNew = !(await fsGet("questions", q.id));
+      // Store explanationOm/En as rubric so they're accessible in the question record
+      const record = {
+        ...q,
+        rubric: q.rubric || q.explanationOm || "",
+        updatedAt: Date.now(),
+        ...(isNew ? { createdAt: Date.now() } : {}),
+      };
+      // Remove AI-only fields not in the core schema
+      const { explanationOm: _eo, explanationEn: _ee, ...clean } = record as typeof record & { explanationOm?: string; explanationEn?: string };
+      await fsSet("questions", q.id, clean as unknown as Record<string, unknown>);
+      ids.push(q.id);
+    }
+
+    await logAudit(
+      actor,
+      "question.bulkImport",
+      undefined,
+      `${ids.length} questions imported via AI`,
+    );
+
+    return { saved: ids.length, ids };
+  });
+

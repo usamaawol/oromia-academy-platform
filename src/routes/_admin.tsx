@@ -15,6 +15,7 @@ import {
   Trophy,
   Users,
   X,
+  Zap,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 
@@ -47,6 +48,7 @@ function AdminLayout() {
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const { theme, setTheme } = useTheme();
 
   useEffect(() => {
     if (!loading && (!user || !isStaff)) {
@@ -56,20 +58,33 @@ function AdminLayout() {
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+      <div className="flex min-h-screen items-center justify-center bg-background">
+        <div className="flex flex-col items-center gap-4">
+          <div className="grid size-12 place-items-center rounded-2xl bg-primary/10">
+            <GraduationCap className="size-6 text-primary animate-pulse" />
+          </div>
+          <div className="h-1 w-32 overflow-hidden rounded-full bg-muted">
+            <div className="h-full w-1/2 animate-[slide_1s_ease-in-out_infinite] rounded-full bg-primary" />
+          </div>
+        </div>
       </div>
     );
   }
 
   if (!user || !isStaff) return null;
 
+  const roleColor: Record<string, string> = {
+    owner: "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300",
+    admin: "bg-primary/10 text-primary",
+    instructor: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300",
+  };
+
   return (
     <div className="flex min-h-screen bg-background">
       {/* Mobile overlay */}
       {sidebarOpen && (
         <div
-          className="fixed inset-0 z-40 bg-black/50 lg:hidden"
+          className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm lg:hidden"
           onClick={() => setSidebarOpen(false)}
         />
       )}
@@ -77,18 +92,24 @@ function AdminLayout() {
       {/* Sidebar */}
       <aside
         className={cn(
-          "fixed inset-y-0 left-0 z-50 flex w-60 flex-col border-r bg-card transition-transform lg:static lg:translate-x-0",
+          "fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r border-border/60 bg-card transition-transform duration-300 ease-in-out lg:static lg:translate-x-0",
           sidebarOpen ? "translate-x-0" : "-translate-x-full",
         )}
       >
         {/* Logo */}
-        <div className="flex h-16 items-center gap-2 border-b px-4">
-          <span className="grid size-8 place-items-center rounded-lg bg-primary text-primary-foreground">
-            <GraduationCap className="size-4" />
-          </span>
-          <span className="font-bold">{t("common.academy")}</span>
+        <div className="flex h-16 items-center gap-3 border-b border-border/60 px-5">
+          <div className="grid size-9 shrink-0 place-items-center rounded-xl bg-primary shadow-glow">
+            <GraduationCap className="size-5 text-primary-foreground" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="truncate font-bold text-sm leading-tight">{t("common.academy")}</p>
+            <div className="flex items-center gap-1 mt-0.5">
+              <Zap className="size-2.5 text-primary" />
+              <span className="text-xs text-muted-foreground">Admin Panel</span>
+            </div>
+          </div>
           <button
-            className="ml-auto rounded p-1 hover:bg-accent lg:hidden"
+            className="ml-auto rounded-lg p-1.5 hover:bg-accent transition-colors lg:hidden"
             onClick={() => setSidebarOpen(false)}
           >
             <X className="size-4" />
@@ -97,49 +118,83 @@ function AdminLayout() {
 
         {/* Nav */}
         <nav className="flex-1 overflow-y-auto px-3 py-4">
-          <div className="space-y-1">
+          <p className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/70">
+            Navigation
+          </p>
+          <div className="space-y-0.5">
             {NAV_ITEMS.map(({ to, label, icon: Icon }) => {
-              const active = to === "/admin" ? pathname === "/admin" : pathname.startsWith(to);
+              const active =
+                to === "/admin"
+                  ? pathname === "/admin" || pathname === "/admin/"
+                  : pathname.startsWith(to);
               return (
                 <Link
                   key={to}
                   to={to}
                   onClick={() => setSidebarOpen(false)}
                   className={cn(
-                    "flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+                    "group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-150",
                     active
-                      ? "bg-primary text-primary-foreground"
+                      ? "bg-primary text-primary-foreground shadow-glow"
                       : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
                   )}
                 >
-                  <Icon className="size-4 shrink-0" />
+                  <div
+                    className={cn(
+                      "grid size-7 shrink-0 place-items-center rounded-lg transition-colors",
+                      active
+                        ? "bg-primary-foreground/15"
+                        : "bg-muted group-hover:bg-accent-foreground/10",
+                    )}
+                  >
+                    <Icon className="size-3.5" />
+                  </div>
                   {t(label)}
+                  {active && (
+                    <span className="ml-auto size-1.5 rounded-full bg-primary-foreground/70" />
+                  )}
                 </Link>
               );
             })}
           </div>
         </nav>
 
-        {/* User */}
-        <div className="border-t p-3">
-          <div className="flex items-center gap-2 rounded-lg px-2 py-2">
-            <div className="grid size-8 place-items-center rounded-full bg-primary/10 text-xs font-bold text-primary">
+        {/* User + actions */}
+        <div className="border-t border-border/60 p-3 space-y-1">
+          {/* Theme toggle */}
+          <button
+            onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+            className="w-full flex items-center gap-2 rounded-lg px-3 py-2 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+          >
+            <span>{theme === "dark" ? "☀️" : "🌙"}</span>
+            <span>{theme === "dark" ? "Light mode" : "Dark mode"}</span>
+          </button>
+
+          {/* Profile card */}
+          <div className="flex items-center gap-3 rounded-xl bg-muted/50 px-3 py-2.5">
+            <div className="grid size-8 shrink-0 place-items-center rounded-full bg-primary text-xs font-bold text-primary-foreground shadow-sm">
               {(profile?.fullName ?? "A")[0]?.toUpperCase()}
             </div>
             <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium">{profile?.fullName}</p>
-              <Badge variant="outline" className="text-xs capitalize">
+              <p className="truncate text-xs font-semibold">{profile?.fullName}</p>
+              <span
+                className={cn(
+                  "inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-medium capitalize",
+                  roleColor[profile?.role ?? "admin"] ?? "bg-muted text-muted-foreground",
+                )}
+              >
                 {profile?.role}
-              </Badge>
+              </span>
             </div>
           </div>
+
           <Button
             variant="ghost"
             size="sm"
-            className="mt-1 w-full justify-start gap-2 text-muted-foreground"
+            className="w-full justify-start gap-2 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
             onClick={() => void logout()}
           >
-            <LogOut className="size-4" />
+            <LogOut className="size-3.5" />
             {t("auth.logout")}
           </Button>
         </div>
@@ -148,14 +203,19 @@ function AdminLayout() {
       {/* Main */}
       <div className="flex flex-1 flex-col min-w-0">
         {/* Top bar (mobile) */}
-        <div className="flex h-14 items-center gap-3 border-b bg-background px-4 lg:hidden">
+        <div className="flex h-14 items-center gap-3 border-b border-border/60 bg-background/80 px-4 backdrop-blur-sm lg:hidden sticky top-0 z-30">
           <Button variant="ghost" size="icon" onClick={() => setSidebarOpen(true)}>
             <Menu className="size-5" />
           </Button>
-          <span className="font-semibold">{t("admin.title")}</span>
+          <div className="flex items-center gap-2">
+            <div className="grid size-7 place-items-center rounded-lg bg-primary">
+              <GraduationCap className="size-4 text-primary-foreground" />
+            </div>
+            <span className="font-semibold text-sm">{t("admin.title")}</span>
+          </div>
         </div>
 
-        <main className="flex-1 overflow-auto p-6">
+        <main className="flex-1 overflow-auto p-4 md:p-6">
           <Outlet />
         </main>
       </div>
