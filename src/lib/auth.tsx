@@ -147,17 +147,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
       const cred = await createUserWithEmailAndPassword(getFirebaseAuth(), email, input.password);
       await updateProfile(cred.user, { displayName: input.fullName });
+      // Use the email address exactly as stored by Firebase Auth (normalised to
+      // lowercase) so the Firestore allow-create rule
+      // `email == request.auth.token.email` is satisfied.
+      const canonicalEmail = (cred.user.email ?? email).toLowerCase().trim();
+      const now = Date.now();
       const p: UserProfile = {
         id: cred.user.uid,
         uid: cred.user.uid,
         fullName: input.fullName,
-        email,
+        email: canonicalEmail,
         ...(input.phone ? { phone: input.phone } : {}),
         ...(input.department ? { department: input.department } : {}),
         role: "student",
         status: "active",
         enrolledCourseIds: input.courseId ? [input.courseId] : [],
-        createdAt: Date.now(),
+        courseIds: input.courseId ? [input.courseId] : [],
+        createdAt: now,
+        updatedAt: now,
       };
       await saveUserProfile(p);
       setProfile(p);

@@ -76,8 +76,8 @@ service cloud.firestore {
         request.resource.data.status == resource.data.status &&
         request.resource.data.createdAt == resource.data.createdAt &&
         request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'id', 'uid', 'email', 'fullName', 'phone', 'department',
-          'enrolledCourseIds', 'role', 'status', 'createdAt', 'updatedAt'
+          'id', 'uid', 'email', 'fullName', 'phone', 'department', 'nickname',
+          'enrolledCourseIds', 'courseIds', 'role', 'status', 'createdAt', 'updatedAt'
         ]);
       // No client-side deletes
       allow delete: if false;

@@ -11,7 +11,9 @@ import {
   LayoutDashboard,
   LogOut,
   Menu,
+  Moon,
   Settings,
+  Sun,
   Trophy,
   Users,
   X,
@@ -31,7 +33,6 @@ export const Route = createFileRoute("/_admin")({
 });
 
 const NAV_ITEMS = [
-  { to: "/admin", label: "admin.overview", icon: LayoutDashboard, end: true },
   { to: "/admin/students", label: "admin.students", icon: Users },
   { to: "/admin/courses", label: "admin.courses", icon: BookOpen },
   { to: "/admin/questions", label: "admin.questions", icon: ClipboardList },
@@ -123,10 +124,7 @@ function AdminLayout() {
           </p>
           <div className="space-y-0.5">
             {NAV_ITEMS.map(({ to, label, icon: Icon }) => {
-              const active =
-                to === "/admin"
-                  ? pathname === "/admin" || pathname === "/admin/"
-                  : pathname.startsWith(to);
+              const active = pathname === to || pathname.startsWith(to + "/");
               return (
                 <Link
                   key={to}
@@ -164,9 +162,11 @@ function AdminLayout() {
           {/* Theme toggle */}
           <button
             onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-            className="w-full flex items-center gap-2 rounded-lg px-3 py-2 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+            className="w-full flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
           >
-            <span>{theme === "dark" ? "☀️" : "🌙"}</span>
+            {theme === "dark"
+              ? <Sun className="size-3.5 shrink-0" />
+              : <Moon className="size-3.5 shrink-0" />}
             <span>{theme === "dark" ? "Light mode" : "Dark mode"}</span>
           </button>
 

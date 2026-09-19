@@ -170,8 +170,7 @@ function AiImportPage() {
   }
 
   async function resolveOrCreateCourse(): Promise<string> {
-    const name = courseInput.trim();
-    if (!name) throw new Error("Maqaa koorsii galchi");
+    const name = courseInput.trim() || "Uncategorized";
     const match = courses.find(
       (c) =>
         c.titleOm.toLowerCase() === name.toLowerCase() ||
@@ -197,7 +196,6 @@ function AiImportPage() {
   // ---------------------------------------------------------------------------
   async function handleExtract() {
     if (!rawText.trim()) { toast.error("Gaaffilee paste godhi"); return; }
-    if (!courseInput.trim()) { toast.error("Koorsii barreessi"); return; }
 
     setExtractError("");
     setProgress([]);
@@ -523,7 +521,7 @@ function AiImportPage() {
                 </p>
                 <Button
                   onClick={() => void handleExtract()}
-                  disabled={!rawText.trim() || !courseInput.trim()}
+                  disabled={!rawText.trim()}
                   className="gap-2"
                 >
                   <Bot className="size-4" />

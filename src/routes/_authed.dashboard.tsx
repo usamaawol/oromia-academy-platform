@@ -52,6 +52,8 @@ import { saveUserProfile } from "@/lib/db";
 import type { Exam, Attempt } from "@/lib/schema";
 import { listNotifications } from "@/lib/data";
 import type { AppNotification } from "@/lib/types";
+import { getFirebaseAuth, firebaseReady } from "@/lib/firebase";
+import { onAuthStateChanged } from "firebase/auth";
 
 export const Route = createFileRoute("/_authed/dashboard")({
   head: () => ({
@@ -104,6 +106,20 @@ function DashboardPage() {
     if (!user) return;
     void (async () => {
       try {
+        // Wait for Firebase auth to fully hydrate (token available) before
+        // issuing server calls — prevents "session expired" on fresh signup.
+        if (firebaseReady) {
+          const auth = getFirebaseAuth();
+          if (!auth.currentUser) {
+            await new Promise<void>((resolve) => {
+              const unsub = onAuthStateChanged(auth, (u) => {
+                if (u) { unsub(); resolve(); }
+              });
+              setTimeout(() => { resolve(); }, 4000); // safety timeout
+            });
+          }
+        }
+
         const [e, a, n, r] = await Promise.all([
           call(availableExams, undefined),
           call(myAttempts, undefined),
@@ -116,7 +132,12 @@ function DashboardPage() {
         setRankings(r as RankingItem[]);
       } catch (err) {
         console.error(err);
-        toast.error(serverErrorMessage(err, t));
+        // Suppress session-expired toasts on first load — token may still be
+        // refreshing. Only show the error if it's genuinely unexpected.
+        const msg = String((err as { message?: string })?.message ?? "");
+        if (!msg.includes("auth/required") && !msg.includes("session")) {
+          toast.error(serverErrorMessage(err, t));
+        }
       } finally {
         setLoading(false);
       }

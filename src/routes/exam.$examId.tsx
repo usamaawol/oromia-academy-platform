@@ -320,6 +320,14 @@ function ExamRunner({
   function handleAnswer(questionId: string, answer: string) {
     setAnswers((prev: Record<string, string>) => ({ ...prev, [questionId]: answer }));
     scheduleAutoSave(questionId, answer);
+    // Auto-advance for MCQ and true/false after a short delay so the
+    // selection highlight is visible before moving on.
+    const q = view.questions.find((x) => x.questionId === questionId);
+    if (q && (q.type === "mcq" || q.type === "truefalse")) {
+      if (currentIdx < questionCount - 1) {
+        setTimeout(() => setCurrentIdx((i: number) => i + 1), 350);
+      }
+    }
   }
 
   async function handleAutoSubmit() {
@@ -788,52 +796,72 @@ function QuestionInput({
   t: (k: TranslationKey, vars?: Record<string, string | number>) => string;
 }) {
   if (question.type === "mcq") {
+    const letters = ["A", "B", "C", "D", "E", "F"];
     return (
-      <RadioGroup value={answer} onValueChange={onChange} className="space-y-3">
-        {question.options.map((opt) => {
+      <div className="space-y-3">
+        {question.options.map((opt, i) => {
           const label = lang === "om" ? opt.textOm : (opt.textEn ?? opt.textOm);
+          const selected = answer === opt.id;
           return (
-            <div
+            <button
               key={opt.id}
-              className={cn(
-                "flex items-center gap-3 rounded-lg border p-4 cursor-pointer transition-colors",
-                answer === opt.id ? "border-primary bg-primary/5" : "hover:bg-accent/50",
-              )}
+              type="button"
               onClick={() => onChange(opt.id)}
+              className={cn(
+                "w-full flex items-center gap-4 rounded-2xl border-2 px-5 py-4 text-left transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
+                selected
+                  ? "border-primary bg-primary/10 shadow-md scale-[1.01]"
+                  : "border-border hover:border-primary/50 hover:bg-accent/40",
+              )}
             >
-              <RadioGroupItem value={opt.id} id={opt.id} />
-              <Label htmlFor={opt.id} className="cursor-pointer flex-1">
+              <span className={cn(
+                "grid size-9 shrink-0 place-items-center rounded-xl text-sm font-bold transition-colors",
+                selected
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-muted text-muted-foreground",
+              )}>
+                {letters[i] ?? String(i + 1)}
+              </span>
+              <span className={cn("flex-1 text-base leading-snug", selected && "font-medium")}>
                 {label}
-              </Label>
-            </div>
+              </span>
+              {selected && (
+                <CheckCircle2 className="size-5 text-primary shrink-0" />
+              )}
+            </button>
           );
         })}
-      </RadioGroup>
+      </div>
     );
   }
 
   if (question.type === "truefalse") {
     return (
-      <RadioGroup value={answer} onValueChange={onChange} className="flex gap-4">
+      <div className="flex gap-4">
         {[
-          { value: "true", label: t("exam.true") },
-          { value: "false", label: t("exam.false") },
-        ].map(({ value, label }) => (
-          <div
-            key={value}
-            className={cn(
-              "flex flex-1 items-center justify-center gap-2 rounded-lg border p-4 cursor-pointer transition-colors",
-              answer === value ? "border-primary bg-primary/5" : "hover:bg-accent/50",
-            )}
-            onClick={() => onChange(value)}
-          >
-            <RadioGroupItem value={value} id={`tf-${value}`} />
-            <Label htmlFor={`tf-${value}`} className="cursor-pointer text-base font-medium">
-              {label}
-            </Label>
-          </div>
-        ))}
-      </RadioGroup>
+          { value: "true",  label: t("exam.true"),  emoji: "✅" },
+          { value: "false", label: t("exam.false"), emoji: "❌" },
+        ].map(({ value, label, emoji }) => {
+          const selected = answer === value;
+          return (
+            <button
+              key={value}
+              type="button"
+              onClick={() => onChange(value)}
+              className={cn(
+                "flex flex-1 flex-col items-center justify-center gap-2 rounded-2xl border-2 py-6 transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
+                selected
+                  ? "border-primary bg-primary/10 shadow-md scale-[1.01]"
+                  : "border-border hover:border-primary/50 hover:bg-accent/40",
+              )}
+            >
+              <span className="text-3xl">{emoji}</span>
+              <span className={cn("text-base font-semibold", selected && "text-primary")}>{label}</span>
+              {selected && <CheckCircle2 className="size-5 text-primary" />}
+            </button>
+          );
+        })}
+      </div>
     );
   }
 

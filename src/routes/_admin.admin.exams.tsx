@@ -54,14 +54,17 @@ import {
   adminSaveExam,
   adminDeleteExam,
   adminListCourses,
+  adminSaveCourse,
   adminListQuestions,
   adminSaveQuestion,
+  adminAiExtractQuestions,
   getExamLeaderboard,
 } from "@/lib/server-fns";
 import { serverErrorMessage } from "@/lib/server-error";
 import { useServerFn } from "@/hooks/use-server-fn";
 import { cn } from "@/lib/utils";
 import type { Course, Exam, Question } from "@/lib/schema";
+import type { AiExtractionResult } from "@/lib/ai-import.server";
 
 export const Route = createFileRoute("/_admin/admin/exams")({
   validateSearch: (s: Record<string, unknown>): { new?: string } => ({
@@ -203,6 +206,8 @@ function ExamsPage() {
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Exam>({ ...BLANK_EXAM });
+  const [courseInput, setCourseInput] = useState("");
+  const [showCourseSuggestions, setShowCourseSuggestions] = useState(false);
   const [password, setPassword] = useState("");
   const [saving, setSaving] = useState(false);
   const [wizardTab, setWizardTab] = useState("basics");
@@ -211,6 +216,7 @@ function ExamsPage() {
   // PDF import state
   const [pdfQuestions, setPdfQuestions] = useState<ParsedQuestion[]>([]);
   const [pdfImporting, setPdfImporting] = useState(false);
+  const [aiExtracting, setAiExtracting] = useState(false);
   const [selectedPdfQs, setSelectedPdfQs] = useState<Set<number>>(new Set());
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -248,6 +254,7 @@ function ExamsPage() {
 
   function openNew() {
     setEditing({ ...BLANK_EXAM, id: crypto.randomUUID() });
+    setCourseInput("");
     setPassword("");
     setWizardTab("basics");
     setPdfQuestions([]);
@@ -257,6 +264,8 @@ function ExamsPage() {
 
   function openEdit(e: Exam) {
     setEditing({ ...e });
+    const existing = courses.find((c) => c.id === e.courseId);
+    setCourseInput(existing?.titleEn || existing?.titleOm || "");
     setPassword("");
     setWizardTab("basics");
     setPdfQuestions([]);
@@ -279,7 +288,7 @@ function ExamsPage() {
 
   async function save() {
     if (!editing.title.trim()) { toast.error("Title required"); return; }
-    if (!editing.courseId) { toast.error("Select a course"); return; }
+    if (!courseInput.trim()) { toast.error("Course name required"); return; }
     if (editing.durationMin < 1) { toast.error("Duration must be at least 1 minute"); return; }
     if (editing.passMark < 0 || editing.passMark > 100) { toast.error("Pass mark must be 0–100"); return; }
     if (editing.poolSize && editing.poolSize > editing.questionIds.length) {
@@ -291,7 +300,30 @@ function ExamsPage() {
     }
     setSaving(true);
     try {
-      await call(adminSaveExam, { exam: editing, ...(password ? { password } : {}) });
+      // Resolve or create course from free-text input
+      const name = courseInput.trim();
+      let courseId = editing.courseId;
+      const match = courses.find(
+        (c) =>
+          c.titleEn.toLowerCase() === name.toLowerCase() ||
+          c.titleOm.toLowerCase() === name.toLowerCase(),
+      );
+      if (match) {
+        courseId = match.id;
+      } else {
+        const newId = crypto.randomUUID();
+        await call(adminSaveCourse, {
+          course: {
+            id: newId, titleOm: name, titleEn: name,
+            descOm: "", descEn: "", icon: "graduation-cap",
+            level: "medium", status: "active", order: courses.length,
+          },
+        });
+        courseId = newId;
+        const freshCourses = await call(adminListCourses, undefined);
+        setCourses(freshCourses as Course[]);
+      }
+      await call(adminSaveExam, { exam: { ...editing, courseId }, ...(password ? { password } : {}) });
       toast.success(t("common.success"));
       setDialogOpen(false);
       await refresh();
@@ -313,6 +345,17 @@ function ExamsPage() {
     }
   }
 
+  async function togglePublish(exam: Exam) {
+    const newStatus = exam.status === "active" ? "draft" : "active";
+    try {
+      await call(adminSaveExam, { exam: { ...exam, status: newStatus } });
+      toast.success(newStatus === "active" ? "Exam published" : "Exam unpublished");
+      await refresh();
+    } catch (e) {
+      toast.error(serverErrorMessage(e, t));
+    }
+  }
+
   function toggleQuestion(qid: string) {
     setEditing((prev) => ({
       ...prev,
@@ -324,23 +367,42 @@ function ExamsPage() {
 
   const set = <K extends keyof Exam>(k: K, v: Exam[K]) => setEditing((p) => ({ ...p, [k]: v }));
 
-  // PDF extraction using FileReader + basic text parsing
+  // AI-powered extraction from text or uploaded file
+  async function handleAiExtract(text: string) {
+    if (!text.trim()) return;
+    setAiExtracting(true);
+    setPdfQuestions([]);
+    setSelectedPdfQs(new Set());
+    try {
+      const result = await call(adminAiExtractQuestions, { text });
+      const data = result as AiExtractionResult;
+      // Convert AI questions to ParsedQuestion format for preview/selection
+      const parsed: ParsedQuestion[] = data.questions.map((q) => ({
+        text: q.questionOm,
+        options: q.options.map((o) => o.textOm),
+        answerIdx: q.correctAnswer
+          ? ["A", "B", "C", "D"].indexOf(q.correctAnswer)
+          : null,
+        type: q.type === "truefalse" ? "truefalse" : q.type === "mcq" ? "mcq" : "essay",
+        // keep extra AI data for saving
+        _ai: q,
+      } as ParsedQuestion & { _ai: typeof q }));
+      setPdfQuestions(parsed);
+      setSelectedPdfQs(new Set(parsed.map((_, i) => i)));
+      toast.success(`AI found ${parsed.length} question${parsed.length !== 1 ? "s" : ""}`);
+    } catch (err) {
+      toast.error(serverErrorMessage(err, t));
+    } finally {
+      setAiExtracting(false);
+    }
+  }
+
   async function handlePdfFile(file: File) {
     if (!file) return;
     setPdfImporting(true);
-    setPdfQuestions([]);
     try {
-      // Read file as text — works for .txt; for actual PDF we'd need a library
-      // We support .txt exports from PDFs and plain text pasted content
       const text = await file.text();
-      const parsed = parsePdfText(text);
-      if (parsed.length === 0) {
-        toast.error("No questions found. Ensure the file uses numbered question format.");
-      } else {
-        setPdfQuestions(parsed);
-        setSelectedPdfQs(new Set(parsed.map((_, i) => i)));
-        toast.success(`Found ${parsed.length} questions`);
-      }
+      await handleAiExtract(text);
     } catch {
       toast.error("Could not read file");
     } finally {
@@ -356,29 +418,38 @@ function ExamsPage() {
       const newIds: string[] = [];
       for (const pq of toImport) {
         const qid = crypto.randomUUID();
-        const optObjs = pq.options.map((txt) => ({ id: crypto.randomUUID(), textOm: txt, textEn: "" }));
+        // Use AI enriched data if available, otherwise fall back to parsed text
+        const ai = (pq as ParsedQuestion & { _ai?: AiExtractionResult["questions"][0] })._ai;
+        const optObjs = ai
+          ? ai.options.map((o) => ({ id: crypto.randomUUID(), textOm: o.textOm, textEn: o.textEn || "" }))
+          : pq.options.map((txt) => ({ id: crypto.randomUUID(), textOm: txt, textEn: "" }));
+        const correctIdx = ai
+          ? ["A", "B", "C", "D"].indexOf(ai.correctAnswer ?? "")
+          : pq.answerIdx;
+        const resolvedCourseId = editing.courseId || courses[0]?.id || "";
         const q = {
           id: qid,
-          courseId: editing.courseId || courses[0]?.id || "",
+          courseId: resolvedCourseId,
           topic: editing.topic ?? "",
           type: pq.type,
-          language: "om" as const,
+          language: (ai?.questionEn ? "both" : "om") as "om" | "en" | "both",
           difficulty: "medium" as const,
-          textOm: pq.text,
-          textEn: "",
+          textOm: ai?.questionOm ?? pq.text,
+          textEn: ai?.questionEn ?? "",
           options: optObjs,
-          correctOptionId: pq.answerIdx !== null ? optObjs[pq.answerIdx]?.id : undefined,
-          correctBool: undefined,
+          correctOptionId: correctIdx !== null && correctIdx >= 0 ? optObjs[correctIdx]?.id : undefined,
+          correctBool: pq.type === "truefalse"
+            ? (ai?.correctAnswer?.toLowerCase() === "true")
+            : undefined,
           expectedAnswer: "",
-          rubric: "",
+          rubric: ai?.explanationOm ?? "",
           points: 1,
-          tags: ["pdf-import"],
-          approved: false,
+          tags: ["ai-import"],
+          approved: true,
         };
         await call(adminSaveQuestion, { question: q });
         newIds.push(qid);
       }
-      // Refresh questions and add to exam
       const freshQs = await call(adminListQuestions, {});
       setQuestions(freshQs as Question[]);
       setEditing((prev) => ({ ...prev, questionIds: [...new Set([...prev.questionIds, ...newIds])] }));
@@ -481,6 +552,18 @@ function ExamsPage() {
                     >
                       <Users className="size-3.5" /> Board
                     </Button>
+                    <Button
+                      variant={exam.status === "active" ? "secondary" : "default"}
+                      size="sm"
+                      className="gap-1.5 text-xs"
+                      onClick={() => void togglePublish(exam)}
+                    >
+                      {exam.status === "active" ? (
+                        <><XCircle className="size-3.5" /> Unpublish</>
+                      ) : (
+                        <><Zap className="size-3.5" /> Publish</>
+                      )}
+                    </Button>
                     <Button variant="ghost" size="icon" onClick={() => openEdit(exam)}>
                       <Pencil className="size-4" />
                     </Button>
@@ -553,16 +636,78 @@ function ExamsPage() {
                   />
                 </div>
                 <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1.5">
+                  <div className="relative space-y-1.5">
                     <Label>Course *</Label>
-                    <Select value={editing.courseId} onValueChange={(v) => set("courseId", v)}>
-                      <SelectTrigger><SelectValue placeholder="Select course" /></SelectTrigger>
-                      <SelectContent>
-                        {courses.map((c) => (
-                          <SelectItem key={c.id} value={c.id}>{c.titleEn}</SelectItem>
+                    <div className="relative">
+                      <Input
+                        placeholder="Type or select a course..."
+                        value={courseInput}
+                        autoComplete="off"
+                        onChange={(e) => {
+                          setCourseInput(e.target.value);
+                          set("courseId", "");
+                          setShowCourseSuggestions(true);
+                        }}
+                        onFocus={() => setShowCourseSuggestions(true)}
+                        onBlur={() => setTimeout(() => setShowCourseSuggestions(false), 150)}
+                      />
+                      {courseInput.trim() && (
+                        <span className={cn(
+                          "absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-bold px-1.5 py-0.5 rounded pointer-events-none",
+                          !courses.some(
+                            (c) =>
+                              c.titleEn.toLowerCase() === courseInput.trim().toLowerCase() ||
+                              c.titleOm.toLowerCase() === courseInput.trim().toLowerCase(),
+                          )
+                            ? "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300"
+                            : "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300",
+                        )}>
+                          {!courses.some(
+                            (c) =>
+                              c.titleEn.toLowerCase() === courseInput.trim().toLowerCase() ||
+                              c.titleOm.toLowerCase() === courseInput.trim().toLowerCase(),
+                          ) ? "new ✦" : "✓ exists"}
+                        </span>
+                      )}
+                    </div>
+                    {showCourseSuggestions && (
+                      <div className="absolute z-50 left-0 right-0 top-full mt-1 rounded-xl border bg-popover shadow-lg overflow-hidden max-h-48 overflow-y-auto">
+                        {(courseInput.trim()
+                          ? courses.filter(
+                              (c) =>
+                                c.titleEn.toLowerCase().includes(courseInput.toLowerCase()) ||
+                                c.titleOm.toLowerCase().includes(courseInput.toLowerCase()),
+                            )
+                          : courses.slice(0, 6)
+                        ).map((c) => (
+                          <button
+                            key={c.id}
+                            type="button"
+                            onMouseDown={() => {
+                              setCourseInput(c.titleEn || c.titleOm);
+                              set("courseId", c.id);
+                              setShowCourseSuggestions(false);
+                            }}
+                            className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-left hover:bg-accent transition-colors"
+                          >
+                            <span className="flex-1 font-medium">{c.titleEn || c.titleOm}</span>
+                            {c.titleOm && c.titleEn && c.titleOm !== c.titleEn && (
+                              <span className="text-xs text-muted-foreground shrink-0">{c.titleOm}</span>
+                            )}
+                          </button>
                         ))}
-                      </SelectContent>
-                    </Select>
+                        {courseInput.trim() && !courses.some(
+                          (c) =>
+                            c.titleEn.toLowerCase() === courseInput.trim().toLowerCase() ||
+                            c.titleOm.toLowerCase() === courseInput.trim().toLowerCase(),
+                        ) && (
+                          <div className="px-3 py-2 border-t bg-amber-50/50 dark:bg-amber-950/20 text-xs text-amber-700 dark:text-amber-400 flex items-center gap-1.5">
+                            <Plus className="size-3 shrink-0" />
+                            <span>"{courseInput.trim()}" — will be created as a new course</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                   <div className="space-y-1.5">
                     <Label>Status</Label>
@@ -672,17 +817,17 @@ function ExamsPage() {
             {/* ---- PDF IMPORT ---- */}
             {wizardTab === "pdf" && (
               <div className="space-y-4">
+                {/* File upload — AI extracts from text files */}
                 <div className="rounded-xl border-2 border-dashed border-border p-6 text-center">
                   <FileText className="mx-auto size-10 text-muted-foreground mb-3" />
-                  <p className="font-medium">Import questions from a text file</p>
+                  <p className="font-medium">AI Question Extraction</p>
                   <p className="text-sm text-muted-foreground mt-1 mb-4">
-                    Upload a <strong>.txt</strong> file exported from a PDF, or paste your question list.
-                    Questions should be numbered (1. 2. 3.) with options labelled A. B. C. D.
+                    Upload a <strong>.txt</strong> file or paste questions below — the AI will extract and structure them automatically.
                   </p>
                   <input
                     ref={fileRef}
                     type="file"
-                    accept=".txt,.text"
+                    accept=".txt,.text,.pdf"
                     className="hidden"
                     onChange={(e) => {
                       const f = e.target.files?.[0];
@@ -692,11 +837,42 @@ function ExamsPage() {
                   <Button
                     variant="outline"
                     onClick={() => fileRef.current?.click()}
-                    disabled={pdfImporting}
+                    disabled={pdfImporting || aiExtracting}
                   >
                     <Upload className="size-4 mr-2" />
                     {pdfImporting ? "Reading file..." : "Choose File"}
                   </Button>
+                </div>
+
+                {/* Paste area with AI extract button */}
+                <div className="space-y-2">
+                  <Label>Or paste your questions directly</Label>
+                  <Textarea
+                    id="pdf-paste"
+                    rows={8}
+                    placeholder={`Gaaffii 1:\nArtificial Intelligence (AI) jechuun maal jechuudha?\nA. Kompiitara suuraa qofa kaasu\nB. Sirna kompiitaraa hojii sammuu namaa fakkaatu\nC. Kompiitara cimsanii ibsaa isaa dabalu\nD. Internet qofa fayyadamu\n\nDeebii sirrii: ✅ B\nIbsa: AI jechuun teeknooloojii...`}
+                    className="font-mono text-sm"
+                    disabled={aiExtracting}
+                  />
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs text-muted-foreground">
+                      Supports Afaan Oromoo, English, and mixed-language questions with any answer format.
+                    </p>
+                    <Button
+                      onClick={() => {
+                        const ta = document.getElementById("pdf-paste") as HTMLTextAreaElement | null;
+                        void handleAiExtract(ta?.value ?? "");
+                      }}
+                      disabled={aiExtracting || pdfImporting}
+                      className="gap-2 shrink-0"
+                    >
+                      {aiExtracting ? (
+                        <><span className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent" /> Extracting...</>
+                      ) : (
+                        <><Upload className="size-4" /> AI'n Baasi</>
+                      )}
+                    </Button>
+                  </div>
                 </div>
 
                 {pdfQuestions.length > 0 && (
@@ -746,30 +922,10 @@ function ExamsPage() {
                       disabled={saving || selectedPdfQs.size === 0}
                       className="w-full"
                     >
-                      {saving ? "Importing..." : `Import ${selectedPdfQs.size} selected question${selectedPdfQs.size !== 1 ? "s" : ""} to Question Bank`}
+                      {saving ? "Importing..." : `Add ${selectedPdfQs.size} question${selectedPdfQs.size !== 1 ? "s" : ""} to Exam`}
                     </Button>
                   </div>
                 )}
-
-                {/* Paste area */}
-                <div className="space-y-2">
-                  <Label>Or paste your questions directly</Label>
-                  <Textarea
-                    rows={8}
-                    placeholder={`1. What is the capital of Ethiopia?\nA. Nairobi\nB. Addis Ababa\nC. Cairo\nD. Lagos\nAnswer: B\n\n2. True or False: The sky is blue.\nAnswer: True`}
-                    onChange={(e) => {
-                      const text = e.target.value;
-                      if (text.trim()) {
-                        const parsed = parsePdfText(text);
-                        if (parsed.length > 0) {
-                          setPdfQuestions(parsed);
-                          setSelectedPdfQs(new Set(parsed.map((_, i) => i)));
-                        }
-                      }
-                    }}
-                  />
-                  <p className="text-xs text-muted-foreground">Parsed questions will appear above automatically as you type.</p>
-                </div>
               </div>
             )}
 

@@ -1025,24 +1025,28 @@ export const createUserProfile = createServerFn({ method: "POST" })
     }),
   )
   .handler(async ({ data }) => {
-    const existing = await fsGet<UserProfile>("users", data.id);
+    const existing = await fsGet<Profile>("users", data.id);
     if (existing) {
       // Profile already exists, just return it
       return existing;
     }
 
-    const profile: UserProfile = {
+    const now = Date.now();
+    const profile: Profile = {
       id: data.id,
+      uid: data.id,
       fullName: data.fullName,
-      email: data.email,
+      email: data.email.toLowerCase().trim(),
       role: "student",
-      enrolledCourseIds: data.courseId ? [data.courseId] : [],
-      createdAt: Date.now(),
+      courseIds: data.courseId ? [data.courseId] : [],
+      status: "active",
+      createdAt: now,
+      updatedAt: now,
       ...(data.phone && { phone: data.phone }),
       ...(data.department && { department: data.department }),
     };
 
-    await fsSet("users", data.id, profile);
+    await fsSet("users", data.id, profile as unknown as Record<string, unknown>);
     return profile;
   });
 
@@ -1160,14 +1164,20 @@ export const adminAiExtractQuestions = createServerFn({ method: "POST" })
       "";
 
     if (!apiKey) {
-      throw new Error(
-        "OPENROUTER_API_KEY is not configured. Add it to your .env file.",
-      );
+      throw new AppError("ai/not-configured");
     }
 
     // Dynamic import keeps ai-import.server.ts out of the client bundle
-    const { aiExtractQuestions } = await import("./ai-import.server");
-    return aiExtractQuestions(data.text, apiKey);
+    try {
+      const { aiExtractQuestions } = await import("./ai-import.server");
+      return await aiExtractQuestions(data.text, apiKey);
+    } catch (err) {
+      // Re-wrap so TanStack Start forwards the real message to the client
+      // instead of swallowing it as a generic "Error".
+      const msg = err instanceof Error ? err.message : String(err);
+      // Truncate to stay within serverErrorMessage's 220-char passthrough limit
+      throw new AppError(msg.slice(0, 200));
+    }
   });
 
 // ---------------------------------------------------------------------------

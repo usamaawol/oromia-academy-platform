@@ -10,6 +10,7 @@ const CODE_KEYS: Record<string, TranslationKey> = {
   "auth/invalid-session": "error.auth.required",
   "auth/forbidden": "error.auth.forbidden",
   "auth/suspended": "error.auth.suspended",
+  "ai/not-configured": "error.ai.notConfigured",
 };
 
 type Translator = (key: TranslationKey, vars?: Record<string, string | number>) => string;

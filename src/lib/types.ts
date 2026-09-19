@@ -7,11 +7,14 @@ export type UserProfile = {
   email: string;
   phone?: string;
   department?: string;
+  nickname?: string; // anonymous display name for leaderboards
   role: Role;
   status?: "active" | "suspended";
   enrolledCourseIds: string[];
+  courseIds?: string[]; // server-side alias — same data
   progress?: Record<string, number>;
   createdAt?: number;
+  updatedAt?: number;
 };
 
 export type Course = {

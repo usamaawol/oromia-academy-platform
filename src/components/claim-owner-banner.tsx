@@ -1,6 +1,7 @@
 import { ShieldCheck } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { useNavigate } from "@tanstack/react-router";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -25,6 +26,7 @@ export function ClaimOwnerBanner() {
   const { t } = useI18n();
   const { profile, refreshProfile } = useAuth();
   const call = useServerFn();
+  const navigate = useNavigate();
   const [hasOwner, setHasOwner] = useState<boolean | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -43,6 +45,8 @@ export function ClaimOwnerBanner() {
       await call(claimOwner as unknown as ServerFnLike, undefined);
       await refreshProfile();
       toast.success(t("auth.ownerClaimed"));
+      // Navigate to the admin panel now that the role is elevated.
+      void navigate({ to: "/admin" });
     } catch (err) {
       console.error("Failed to claim owner:", err);
       toast.error(t("auth.ownerExists"));
