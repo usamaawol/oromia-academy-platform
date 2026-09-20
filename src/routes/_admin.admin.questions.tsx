@@ -2,7 +2,7 @@
  * Admin — Question bank
  */
 import { createFileRoute, useSearch } from "@tanstack/react-router";
-import { CheckCircle2, Pencil, Plus, Sparkles, Trash2, XCircle } from "lucide-react";
+import { CheckCircle2, ClipboardPaste, Pencil, Plus, Sparkles, Trash2, XCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
@@ -78,6 +78,7 @@ function QuestionsPage() {
   const [courseFilter, setCourseFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [dialogMode, setDialogMode] = useState<"paste" | "form">("paste");
   const [editing, setEditing] = useState<Question>({ ...BLANK });
   const [courseInput, setCourseInput] = useState("");
   const [saving, setSaving] = useState(false);
@@ -121,6 +122,7 @@ function QuestionsPage() {
       options: [BLANK_OPT(), BLANK_OPT(), BLANK_OPT(), BLANK_OPT()],
     });
     setCourseInput("");
+    setDialogMode("paste"); // always open in paste mode for new questions
     setDialogOpen(true);
   }
 
@@ -128,6 +130,7 @@ function QuestionsPage() {
     setEditing({ ...q, options: q.options.length > 0 ? q.options : [BLANK_OPT(), BLANK_OPT()] });
     const existing = courses.find((c) => c.id === q.courseId);
     setCourseInput(existing?.titleOm || existing?.titleEn || "");
+    setDialogMode("form"); // edit always goes straight to form
     setDialogOpen(true);
   }
 
@@ -173,6 +176,75 @@ function QuestionsPage() {
 
       await call(adminSaveQuestion, { question: { ...editing, courseId, approved: true } });
       toast.success(t("common.success"));
+      setDialogOpen(false);
+      await refresh();
+    } catch (e) {
+      toast.error(serverErrorMessage(e, t));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function saveAllParsed(blocks: ParsedBlock[], courseIdOrNew: string) {
+    setSaving(true);
+    let saved = 0;
+    try {
+      // Resolve courseId — may need to create a new course
+      let courseId = courseIdOrNew;
+      if (courseIdOrNew.startsWith("__new__:")) {
+        const courseName = courseIdOrNew.slice("__new__:".length);
+        const newId = crypto.randomUUID();
+        await call(adminSaveCourse, {
+          course: {
+            id: newId,
+            titleOm: courseName,
+            titleEn: courseName,
+            descOm: "",
+            descEn: "",
+            icon: "sparkles",
+            level: "medium",
+            status: "active",
+            order: courses.length,
+          },
+        });
+        courseId = newId;
+        const freshCourses = await call(adminListCourses, undefined);
+        setCourses(freshCourses as Course[]);
+      }
+
+      for (const parsed of blocks) {
+        const newOpts = parsed.options.map((text) => ({
+          id: crypto.randomUUID(),
+          textOm: text,
+          textEn: "",
+        }));
+        const letterIdx = ["A", "B", "C", "D", "E", "F"].indexOf(parsed.correctLetter);
+        const correctOptionId = letterIdx >= 0 && newOpts[letterIdx]
+          ? newOpts[letterIdx]!.id
+          : undefined;
+
+        const q: Question = {
+          id: crypto.randomUUID(),
+          courseId,
+          topic: "",
+          type: parsed.type,
+          language: "om",
+          difficulty: "medium",
+          textOm: parsed.questionText,
+          textEn: "",
+          options: newOpts.length >= 2 ? newOpts : [BLANK_OPT(), BLANK_OPT(), BLANK_OPT(), BLANK_OPT()],
+          ...(correctOptionId ? { correctOptionId } : {}),
+          ...(parsed.type === "truefalse" ? { correctBool: parsed.correctLetter === "TRUE" } : {}),
+          ...(parsed.explanation ? { rubric: parsed.explanation } : {}),
+          expectedAnswer: "",
+          points: 1,
+          tags: ["paste-import"],
+          approved: true,
+        };
+        await call(adminSaveQuestion, { question: q });
+        saved++;
+      }
+      toast.success(`${saved} gaaffii milkaa'inaan galame ✓`);
       setDialogOpen(false);
       await refresh();
     } catch (e) {
@@ -304,27 +376,507 @@ function QuestionsPage() {
 
       {/* Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+        <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
-            <DialogTitle>
-              {editing.id && questions.some((q) => q.id === editing.id)
-                ? "Gaaffii gulaali"
-                : t("admin.newQuestion")}
+            <DialogTitle className="flex items-center justify-between pr-6">
+              <span>
+                {editing.id && questions.some((q) => q.id === editing.id)
+                  ? "Gaaffii gulaali"
+                  : t("admin.newQuestion")}
+              </span>
+              {/* Mode toggle pills */}
+              <div className="flex items-center gap-1 rounded-lg border bg-muted p-0.5 text-xs font-medium">
+                <button
+                  type="button"
+                  onClick={() => setDialogMode("paste")}
+                  className={cn(
+                    "flex items-center gap-1.5 rounded-md px-2.5 py-1 transition-colors",
+                    dialogMode === "paste"
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  <ClipboardPaste className="size-3" /> Paste
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDialogMode("form")}
+                  className={cn(
+                    "flex items-center gap-1.5 rounded-md px-2.5 py-1 transition-colors",
+                    dialogMode === "form"
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  <Pencil className="size-3" /> Manual
+                </button>
+              </div>
             </DialogTitle>
           </DialogHeader>
-          <QuestionForm
-            q={editing}
-            courses={courses}
-            courseInput={courseInput}
-            onCourseChange={setCourseInput}
-            onChange={setEditing}
-            onSave={() => void save()}
-            onCancel={() => setDialogOpen(false)}
-            saving={saving}
-            t={t}
-          />
+
+          {dialogMode === "paste" ? (
+            <PasteMode
+              courses={courses}
+              saving={saving}
+              onParsed={(parsed) => {
+                const newOpts = parsed.options.map((text) => ({
+                  id: crypto.randomUUID(),
+                  textOm: text,
+                  textEn: "",
+                }));
+                const letterIdx = ["A", "B", "C", "D", "E", "F"].indexOf(parsed.correctLetter);
+                const correctOptionId =
+                  letterIdx >= 0 && newOpts[letterIdx] ? newOpts[letterIdx]!.id : undefined;
+                const patch: Partial<Question> = {
+                  textOm: parsed.questionText,
+                  type: parsed.type,
+                  options:
+                    newOpts.length >= 2
+                      ? newOpts
+                      : [BLANK_OPT(), BLANK_OPT(), BLANK_OPT(), BLANK_OPT()],
+                };
+                if (parsed.explanation) patch.rubric = parsed.explanation;
+                if (correctOptionId) patch.correctOptionId = correctOptionId;
+                if (parsed.type === "truefalse")
+                  patch.correctBool = parsed.correctLetter === "TRUE";
+                setEditing((prev) => ({ ...prev, ...patch }));
+                setDialogMode("form");
+              }}
+              onSaveAll={(blocks, courseId) => void saveAllParsed(blocks, courseId)}
+              onManual={() => setDialogMode("form")}
+            />
+          ) : (
+            <QuestionForm
+              q={editing}
+              courses={courses}
+              courseInput={courseInput}
+              onCourseChange={setCourseInput}
+              onChange={setEditing}
+              onSave={() => void save()}
+              onCancel={() => setDialogOpen(false)}
+              saving={saving}
+              t={t}
+            />
+          )}
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Multi-question parser — splits pasted text into blocks then parses each one
+// Handles: Gaaffii 1/Question 1/Q1/numbered, any case, with or without prefix
+// ---------------------------------------------------------------------------
+
+interface ParsedBlock {
+  questionText: string;
+  options: string[];       // text of each option (index = A=0, B=1, …)
+  correctLetter: string;   // "A" | "B" | "C" | "D" | "TRUE" | "FALSE" | ""
+  explanation: string;
+  type: "mcq" | "truefalse" | "short";
+}
+
+/** Split raw text into individual question blocks */
+function splitIntoBlocks(raw: string): string[] {
+  // Split on lines that look like "Question 1:", "Gaaffii 1:", "Q1.", "1.", "1)"
+  // but only when they appear at the start of a line
+  const splitRe = /(?=^\s*(?:gaaffii\s*\d+\s*[:.)\s]|question\s*\d+\s*[:.)\s]|q\s*\d+\s*[:.)\s]|\d+[.):\s]\s+\S))/im;
+  const blocks = raw.split(splitRe).map((b) => b.trim()).filter((b) => b.length > 5);
+  // If no split markers found, treat entire text as one block
+  return blocks.length > 0 ? blocks : [raw.trim()];
+}
+
+/** Parse a single question block */
+function parseBlock(block: string): ParsedBlock | null {
+  const allLines = block.split("\n").map((l) => l.trim()).filter(Boolean);
+  if (allLines.length < 2) return null;
+
+  // ---------------------------------------------------------------
+  // Step 1: Identify the question text line.
+  //   - Skip leading "Question N:", "Gaaffii N:", "N." header lines
+  //   - The question text is the FIRST substantive line that is NOT an option
+  // ---------------------------------------------------------------
+  const isOptionLine = (l: string) => /^[\(\[]?[A-Da-d][\.\)\]\s]\s*.{1,}/i.test(l);
+  const isAnswerLine = (l: string) =>
+    /^(?:correct\s*answer|answer|ans|key|deebii\s*sirrii|deebii|correct)[:\s\-–]/i.test(l) ||
+    /^✅/.test(l);
+  const isExplanationLine = (l: string) =>
+    /^(?:explanation|ibsa\s*gabaabaa?|ibsa|note|why|reason)[:\s\-–]/i.test(l);
+
+  let questionText = "";
+  let bodyStart = 0;
+
+  for (let i = 0; i < allLines.length; i++) {
+    const l = allLines[i]!;
+    // Strip any leading "Question N:", "Gaaffii N:", "Q N.", "N." prefix
+    const stripped = l.replace(
+      /^(?:gaaffii\s*\d+\s*[:.\s]?|question\s*\d+\s*[:.\s]?|q\s*\d+\s*[:.\s]?|\d+\s*[.):]\s*)/i,
+      "",
+    ).trim();
+
+    // Skip if it looks like an option, answer, or explanation line
+    if (isOptionLine(stripped) || isAnswerLine(stripped) || isExplanationLine(stripped)) continue;
+    // Skip very short non-question lines (like just "AI" or a number)
+    if (stripped.length < 5) continue;
+
+    questionText = stripped;
+    bodyStart = i + 1;
+    break;
+  }
+
+  if (!questionText) return null;
+
+  // ---------------------------------------------------------------
+  // Step 2: Parse the remaining lines for options, answer, explanation
+  // ---------------------------------------------------------------
+  const remaining = allLines.slice(bodyStart);
+  const options: string[] = [];
+  const optionLetters: string[] = []; // which letters we've seen (A, B, C, D…)
+  let correctLetter = "";
+  let explanation = "";
+  let type: ParsedBlock["type"] = "short";
+
+  // We only collect option lines while we're in the "options section"
+  // (i.e. before an answer/explanation line). This prevents stray lines
+  // from being picked up as options.
+  let inOptions = true;
+
+  for (let i = 0; i < remaining.length; i++) {
+    const line = remaining[i]!;
+
+    // Option line: "A. ...", "A) ...", "(A) ...", "A - ..."
+    const optMatch = line.match(/^[\(\[]?([A-Da-d])[\.\)\]\s\-]\s*(.+)/i);
+    if (optMatch && optMatch[1] && optMatch[2] && inOptions) {
+      const letter = optMatch[1].toUpperCase();
+      // Only accept if this letter is the expected next one (A→B→C→D order)
+      // This prevents random lines starting with a letter from being treated as options
+      const expectedLetter = String.fromCharCode(65 + options.length); // A, B, C, D...
+      if (letter === expectedLetter || options.length === 0) {
+        options.push(optMatch[2].trim());
+        optionLetters.push(letter);
+        type = "mcq";
+      }
+      continue;
+    }
+
+    // Answer line — many formats
+    const ansMatch = line.match(
+      /^(?:correct\s*answer|answer|ans|key|deebii\s*sirrii|deebii|correct)[:\s\-–—=]*✅?\s*([A-Da-dTtFf][a-z]*)/i,
+    );
+    // Also handle bare "✅ B" or "✅B"
+    const emojiAns = line.match(/^✅\s*([A-Da-d])/i);
+    const ansSource = ansMatch?.[1] ?? emojiAns?.[1];
+    if (ansSource) {
+      inOptions = false;
+      const up = ansSource.toUpperCase();
+      if (up === "TRUE" || up === "T") { correctLetter = "TRUE"; type = "truefalse"; }
+      else if (up === "FALSE" || up === "F") { correctLetter = "FALSE"; type = "truefalse"; }
+      else correctLetter = up.charAt(0);
+      continue;
+    }
+
+    // Explanation line
+    if (isExplanationLine(line)) {
+      inOptions = false;
+      const expMatch = line.match(
+        /^(?:explanation|ibsa\s*gabaabaa?|ibsa|note|why|reason)[:\s\-–]*(.+)/i,
+      );
+      explanation = expMatch?.[1]?.trim() ?? "";
+      // grab continuation lines until the next structural marker
+      let j = i + 1;
+      while (j < remaining.length) {
+        const next = remaining[j]!;
+        if (isOptionLine(next) || isAnswerLine(next) || isExplanationLine(next)) break;
+        explanation += " " + next;
+        j++;
+      }
+      i = j - 1;
+      continue;
+    }
+
+    // Once we see a non-option, non-answer, non-explanation line after options,
+    // stop collecting options
+    if (options.length > 0) inOptions = false;
+  }
+
+  // Trim options to max 6 and only keep the standard A-D set
+  const finalOptions = options.slice(0, 6);
+
+  // If only true/false markers in options, treat as truefalse
+  if (finalOptions.length === 0 && type === "short") {
+    if (/\b(dhugaa|soba|true|false)\b/i.test(questionText)) type = "truefalse";
+  }
+
+  return { questionText, options: finalOptions, correctLetter, explanation, type };
+}
+
+/** Parse all questions from a multi-question paste */
+function parseAllQuestions(raw: string): ParsedBlock[] {
+  const blocks = splitIntoBlocks(raw);
+  return blocks
+    .map((b) => parseBlock(b))
+    .filter((b): b is ParsedBlock => b !== null && b.questionText.length > 3);
+}
+
+// ---------------------------------------------------------------------------
+// PasteMode — full-screen paste UI that handles MULTIPLE questions at once
+// ---------------------------------------------------------------------------
+
+function PasteMode({
+  courses,
+  saving,
+  onParsed,
+  onSaveAll,
+  onManual,
+}: {
+  courses: Course[];
+  saving: boolean;
+  onParsed: (result: ParsedBlock) => void;
+  onSaveAll: (blocks: ParsedBlock[], courseId: string) => void;
+  onManual: () => void;
+}) {
+  const [raw, setRaw] = useState("");
+  const [parsed, setParsed] = useState<ParsedBlock[]>([]);
+  const [error, setError] = useState("");
+  const [bulkCourseInput, setBulkCourseInput] = useState("");
+  const [showCourseSug, setShowCourseSug] = useState(false);
+  const [selectedCourseId, setSelectedCourseId] = useState("");
+
+  const letters = ["A", "B", "C", "D", "E", "F"];
+
+  const courseSuggestions = bulkCourseInput.trim()
+    ? courses.filter(
+        (c) =>
+          c.titleOm.toLowerCase().includes(bulkCourseInput.toLowerCase()) ||
+          c.titleEn.toLowerCase().includes(bulkCourseInput.toLowerCase()),
+      )
+    : courses.slice(0, 6);
+
+  function handleChange(val: string) {
+    setRaw(val);
+    setError("");
+    if (val.trim().length > 10) {
+      const results = parseAllQuestions(val);
+      setParsed(results);
+    } else {
+      setParsed([]);
+    }
+  }
+
+  function handleSaveAll() {
+    if (parsed.length === 0) return;
+    if (!selectedCourseId && !bulkCourseInput.trim()) {
+      setError("Maqaa koorsii galchi"); return;
+    }
+    // Resolve course: use selectedCourseId if set, otherwise pass a sentinel
+    // that saveAllParsed will create as a new course
+    const courseId = selectedCourseId || `__new__:${bulkCourseInput.trim()}`;
+    onSaveAll(parsed, courseId);
+  }
+
+  return (
+    <div className="space-y-4 pt-1">
+      {/* Header */}
+      <div className="rounded-xl border border-primary/25 bg-primary/5 px-4 py-3">
+        <p className="font-semibold text-sm flex items-center gap-2 text-primary">
+          <ClipboardPaste className="size-4" />
+          Gaaffilee guutuu paste godhi
+        </p>
+        <p className="text-xs text-muted-foreground mt-0.5">
+          Gaaffii tokko ykn hedduuyyuu paste godhi — sirreeffamni ofumaan ta'a, gaaffiilee hunda agarsiisa.
+        </p>
+      </div>
+
+      {/* Paste area */}
+      <Textarea
+        autoFocus
+        value={raw}
+        onChange={(e) => handleChange(e.target.value)}
+        rows={10}
+        className="font-mono text-sm resize-y bg-background"
+        placeholder={`Gaaffii 1:
+AI jechuun maal jechuudha?
+A. Sammuu Nam-tolchee
+B. Interneetii Saffisaa
+C. Sagantaa Kompliitaraa
+D. Kuusaa Odeeffannoo
+
+Deebii sirrii: A
+Ibsa: AI jechuun...
+
+Gaaffii 2:
+Machine Learning jechuun maal?
+A. ...
+B. ...`}
+      />
+
+      {error && (
+        <p className="text-xs text-destructive">⚠ {error}</p>
+      )}
+
+      {/* Live preview of ALL detected questions */}
+      {parsed.length > 0 && (
+        <div className="space-y-3">
+          <p className="text-xs font-semibold text-primary flex items-center gap-1.5">
+            <CheckCircle2 className="size-3.5" />
+            {parsed.length} gaaffii argame — gaaffii filachuudhaan galchi
+          </p>
+          <div className="max-h-72 overflow-y-auto space-y-2 pr-1">
+            {parsed.map((q, idx) => (
+              <div
+                key={idx}
+                className="rounded-xl border border-border bg-card p-3 space-y-2"
+              >
+                {/* Question header */}
+                <div className="flex items-start justify-between gap-2">
+                  <p className="text-sm font-medium flex-1">{q.questionText}</p>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="shrink-0 h-7 px-3 text-xs gap-1"
+                    onClick={() => onParsed(q)}
+                  >
+                    <Pencil className="size-3" /> Edit
+                  </Button>
+                </div>
+
+                {/* Options */}
+                {q.type === "mcq" && q.options.length > 0 && (
+                  <div className="grid grid-cols-2 gap-1">
+                    {q.options.map((opt, i) => (
+                      <div
+                        key={i}
+                        className={cn(
+                          "flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-xs",
+                          q.correctLetter === letters[i]
+                            ? "border-green-400 bg-green-50 dark:bg-green-950/20 text-green-800 dark:text-green-300 font-semibold"
+                            : "border-border text-muted-foreground",
+                        )}
+                      >
+                        <span className={cn(
+                          "grid size-5 shrink-0 place-items-center rounded-full text-[10px] font-bold",
+                          q.correctLetter === letters[i]
+                            ? "bg-green-500 text-white"
+                            : "bg-muted text-muted-foreground",
+                        )}>
+                          {letters[i]}
+                        </span>
+                        <span className="line-clamp-1">{opt}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {q.type === "truefalse" && (
+                  <div className="flex gap-2 text-xs">
+                    {["TRUE", "FALSE"].map((v) => (
+                      <span key={v} className={cn(
+                        "rounded-lg border px-3 py-1 font-medium",
+                        q.correctLetter === v
+                          ? "border-green-400 bg-green-50 text-green-800"
+                          : "border-border text-muted-foreground",
+                      )}>
+                        {v === "TRUE" ? "✅ Dhugaa" : "❌ Soba"}
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                {q.explanation && (
+                  <p className="text-[11px] text-muted-foreground border-t pt-1.5 line-clamp-2">
+                    <span className="font-semibold">Ibsa:</span> {q.explanation}
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {/* ── COURSE PICKER + SAVE ALL ── */}
+          <div className="rounded-xl border-2 border-primary/30 bg-primary/5 p-4 space-y-3">
+            <p className="text-sm font-semibold">
+              Gaaffilee hunda olkaa'i — koorsii filadhu
+            </p>
+
+            {/* Course free-text picker */}
+            <div className="relative">
+              <Input
+                placeholder="Maqaa koorsii barreessi ykn filadhu..."
+                value={bulkCourseInput}
+                autoComplete="off"
+                onChange={(e) => {
+                  setBulkCourseInput(e.target.value);
+                  setSelectedCourseId("");
+                  setShowCourseSug(true);
+                  setError("");
+                }}
+                onFocus={() => setShowCourseSug(true)}
+                onBlur={() => setTimeout(() => setShowCourseSug(false), 150)}
+                className="bg-background"
+              />
+              {showCourseSug && courseSuggestions.length > 0 && (
+                <div className="absolute z-50 left-0 right-0 top-full mt-1 rounded-xl border bg-popover shadow-lg overflow-hidden max-h-40 overflow-y-auto">
+                  {courseSuggestions.map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onMouseDown={() => {
+                        setBulkCourseInput(c.titleOm || c.titleEn);
+                        setSelectedCourseId(c.id);
+                        setShowCourseSug(false);
+                      }}
+                      className="w-full flex items-center px-3 py-2.5 text-sm text-left hover:bg-accent"
+                    >
+                      {c.titleOm || c.titleEn}
+                    </button>
+                  ))}
+                  {bulkCourseInput.trim() && !courses.some(
+                    (c) =>
+                      c.titleEn.toLowerCase() === bulkCourseInput.trim().toLowerCase() ||
+                      c.titleOm.toLowerCase() === bulkCourseInput.trim().toLowerCase(),
+                  ) && (
+                    <div className="px-3 py-2 border-t text-xs text-amber-700 dark:text-amber-400">
+                      "{bulkCourseInput.trim()}" — koorsii haaraa uumama
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <Button
+              className="w-full gap-2 text-base h-11"
+              disabled={saving || !bulkCourseInput.trim()}
+              onClick={handleSaveAll}
+            >
+              {saving ? (
+                <><span className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent" /> Olkaa'aa jira...</>
+              ) : (
+                <><CheckCircle2 className="size-5" /> Gaaffilee {parsed.length} hunda olkaa'i</>
+              )}
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {raw.trim().length > 10 && parsed.length === 0 && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/20 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+          ⚠ Gaaffii argachuu hin dandeenye. Mirkaneessi: gaaffii, filannoolee (A. B. C. D.), fi deebii sirrii of-keessatti qabatee paste godhi.
+        </div>
+      )}
+
+      {/* Manual link */}
+      <div className="flex justify-between items-center border-t pt-3">
+        <button
+          type="button"
+          onClick={onManual}
+          className="text-xs text-muted-foreground hover:text-foreground underline-offset-2 hover:underline"
+        >
+          Harkaan galchi →
+        </button>
+        <p className="text-xs text-muted-foreground">
+          Gaaffii tokko filatteen booda fooramii guutuu ni agarsiisu
+        </p>
+      </div>
     </div>
   );
 }
