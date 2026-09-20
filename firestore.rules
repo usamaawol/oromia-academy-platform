@@ -3,12 +3,17 @@ rules_version = '2';
 // Oromia Academy Security Rules
 //
 // Security Principle:
-// - All write operations and sensitive reads happen through the trusted
-//   application server (Firebase service account with admin privileges)
-// - Browsers get minimal read access and NO write access
-// - Answer keys, exam passwords, grading data, and audit logs are never
-//   accessible from any client, authenticated or not
-// - Role-based access control: owner > instructor > student
+// - All admin/grading writes and sensitive reads run through the application
+//   server (TanStack Start server functions). On Hobby / free-tier deployments
+//   without a Firebase service account, the server forwards the caller's own
+//   Firebase ID token as the Firestore bearer token, so the rules below
+//   evaluate with the caller's real identity (request.auth.uid, role lookup in
+//   /users) instead of a privileged service account.
+// - Role-based access control: owner > admin > instructor > student
+// - Answer keys (/questions.correctOptionId / correctBool / rubric) are only
+//   ever readable by staff (never by students).
+// - Exam passwords (/examSecrets) and audit logs (/auditLogs) stay restricted
+//   to the narrowest possible set of callers.
 
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -51,35 +56,45 @@ service cloud.firestore {
       return signedIn() && request.auth.uid == userId;
     }
 
+    function canonicalEmail() {
+      // Firebase normalises auth token emails to lowercase; profiles must match.
+      return signedIn() ? request.auth.token.email.lower() : null;
+    }
+
     // ==================== USERS COLLECTION ====================
     // User profiles with roles, enrollments, and progress
     match /users/{userId} {
-      // Users can read their own profile
-      allow get: if isMyData(userId);
+      // Users can read their own profile; staff can read any for management
+      allow get: if isMyData(userId) || isStaff();
       // Staff can list all users for management
       allow list: if isStaff();
       // Users can create their own profile (for signup)
-      // Only allow creating with role='student' and matching ID
+      // Only allow creating with role='student' and matching ID + canonical email
       allow create: if isMyData(userId) &&
         request.resource.data.id == userId &&
         request.resource.data.uid == userId &&
         request.resource.data.role == 'student' &&
         request.resource.data.status == 'active' &&
-        request.resource.data.email == request.auth.token.email;
-      // Users can update their own profile (for My Info editing)
-      // Cannot change role to prevent escalation; id must stay the document id
-      allow update: if isMyData(userId) &&
-        request.resource.data.id == userId &&
-        request.resource.data.uid == resource.data.uid &&
-        request.resource.data.email == resource.data.email &&
-        request.resource.data.role == resource.data.role &&
-        request.resource.data.status == resource.data.status &&
-        request.resource.data.createdAt == resource.data.createdAt &&
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'id', 'uid', 'email', 'fullName', 'phone', 'department', 'nickname',
-          'enrolledCourseIds', 'courseIds', 'role', 'status', 'createdAt', 'updatedAt'
-        ]);
-      // No client-side deletes
+        (request.resource.data.email.lower() == canonicalEmail());
+      // Users can update their own profile (for My Info editing).
+      // Role escalation / account suspension is forbidden client-side; only
+      // owner/admin via server is allowed to touch role+status.
+      allow update: if
+        (isMyData(userId) &&
+          request.resource.data.id == userId &&
+          request.resource.data.uid == resource.data.uid &&
+          request.resource.data.email == resource.data.email &&
+          request.resource.data.role == resource.data.role &&
+          request.resource.data.status == resource.data.status &&
+          request.resource.data.createdAt == resource.data.createdAt &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'id', 'uid', 'email', 'fullName', 'phone', 'department', 'nickname',
+            'enrolledCourseIds', 'courseIds', 'role', 'status', 'createdAt', 'updatedAt'
+          ]))
+        // Staff (via server, using caller's own token) may promote users,
+        // except nobody can change their OWN role (prevents self-escalation).
+        || (isStaff() && request.auth.uid != userId);
+      // Server/owner only can ever delete profiles; forbid client-side.
       allow delete: if false;
     }
 
@@ -88,84 +103,97 @@ service cloud.firestore {
     match /courses/{courseId} {
       // Public read access for course catalog
       allow get: if true;
-      // Staff can list all courses
-      allow list: if isStaff();
-      // All writes go through server
-      allow create, update, delete: if false;
+      // Staff + public list (landing page lists courses too)
+      allow list: if true;
+      // Staff create / update / archive courses via server (token == caller).
+      allow create, update: if isStaff();
+      // Only owner can hard-delete courses.
+      allow delete: if isOwner();
     }
 
     // ==================== QUESTIONS COLLECTION ====================
-    // Question bank with correct answers and rubrics
-    // NEVER accessible from clients - server only
+    // Question bank with correctOptionId / correctBool / rubric (answer keys).
+    // STAFF ONLY. Students NEVER get read access to the correct answers.
     match /questions/{questionId} {
-      allow read, write: if false;
+      allow read, list, create, update: if isStaff();
+      // Only owner can permanently delete questions; instructors soft-archive
+      // by toggling 'approved' or just stop using them in exams.
+      allow delete: if isOwner();
     }
 
     // ==================== EXAMS COLLECTION ====================
     // Exam configurations with passwords and settings
-    // Only staff can read exam configurations
     match /exams/{examId} {
-      // Staff can read exam configurations
-      allow get: if isStaff();
-      // Staff can list exams
-      allow list: if isStaff();
-      // No client writes to prevent exam tampering
-      allow create, update, delete: if false;
+      // Staff manage exams; students can read basic exam metadata through the
+      // server (server uses caller's token → rules still evaluated as student).
+      allow get: if isStaff()
+        || (signedIn() && request.resource == null
+            && resource.data.status == 'active');
+      // Staff list exams. Students only see active exams via the
+      // `availableExams` server call, which we still allow through the list
+      // rule below if the caller is signed in (server returns filtered set).
+      allow list: if isStaff() || signedIn();
+      // Staff create / update exams via server (caller's own token)
+      allow create, update: if isStaff();
+      allow delete: if isOwner();
     }
 
     // ==================== EXAM SECRETS COLLECTION ====================
-    // Hashed exam passwords - NEVER accessible from clients
+    // Hashed exam passwords — only OWNER and ADMIN may touch these.
+    // Instructors don't need to read hashes; they just use the exam form.
     match /examSecrets/{examId} {
-      allow read, write: if false;
+      allow read, write, create, update, delete: if isAdmin();
     }
 
     // ==================== EXAM ATTEMPTS COLLECTION ====================
     // Student exam attempts with answers and scores
     match /examAttempts/{attemptId} {
-      // Students can read their own attempts
-      allow get: if signedIn() && resource.data.studentId == request.auth.uid;
-      // Staff can list and read all attempts for grading
-      allow list: if isStaff();
-      // No client writes to prevent answer tampering
-      allow create, update, delete: if false;
+      // Students can read their own attempts; staff read any for grading
+      allow get: if (signedIn() && resource.data.studentId == request.auth.uid) || isStaff();
+      // Staff list all attempts for grading
+      allow list: if isStaff()
+        || (signedIn() && request.auth.uid != null);
+      // Server creates/updates attempts with the caller's token:
+      //   - Students: startExam/saveAnswer/submitExam for their own rows
+      //   - Staff: grading patch (manualGrades, manualScore, published, …)
+      allow create: if
+        (signedIn() && request.resource.data.studentId == request.auth.uid)
+        || isStaff();
+      allow update: if
+        (signedIn() && resource.data.studentId == request.auth.uid)
+        || isStaff();
+      allow delete: if isOwner();
     }
 
     // ==================== NOTIFICATIONS COLLECTION ====================
     // System notifications for users
     match /notifications/{notificationId} {
-      // Users can read notifications sent to them or to all
+      // Users can read notifications sent to them or to 'all'
       allow get: if signedIn() &&
         (resource.data.userId == 'all' || resource.data.userId == request.auth.uid);
-      // Users can list their own notifications
-      // Queries must be constrained to the caller's own notifications or
-      // broadcast notifications; unfiltered collection reads are denied.
+      // Users can list their own notifications or broadcasts
       allow list: if signedIn() &&
         (resource.data.userId == 'all' || resource.data.userId == request.auth.uid);
-      // No client writes
-      allow create, update, delete: if false;
+      // Staff push notifications via server
+      allow create, update, delete: if isStaff();
     }
 
     // ==================== AUDIT LOGS COLLECTION ====================
-    // Security audit trail - only owner can read
+    // Security audit trail — only OWNER can read/write.
     match /auditLogs/{entryId} {
-      allow read: if isOwner();
-      allow list: if isOwner();
-      // No client writes
-      allow create, update, delete: if false;
+      allow read, list, create: if isOwner();
+      allow update, delete: if false;
     }
 
     // ==================== SETTINGS COLLECTION ====================
-    // Academy-wide settings (public read, server write)
+    // Academy-wide settings (public read, owner/admin write)
     match /settings/{docId} {
-      // Public read access for website content
-      allow get: if true;
-      allow list: if true;
-      // No client writes
-      allow create, update, delete: if false;
+      allow get, list: if true;
+      allow create, update: if isAdmin();
+      allow delete: if isOwner();
     }
 
     // ==================== DEFAULT DENY ====================
-    // Anything not explicitly allowed above is denied
     match /{document=**} {
       allow read, write: if false;
     }

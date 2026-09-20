@@ -62,61 +62,102 @@ function pemToDer(pem: string): ArrayBuffer {
 
 let tokenCache: { token: string; expiresAt: number } | null = null;
 
+/**
+ * Resolve the Firestore auth token for this request.
+ *
+ * Order of attempts:
+ *   1. Cached service-account access token (valid for > 60 s still)
+ *   2. Full service-account JWT → Google OAuth token exchange (only works on
+ *      runtimes with Node/WebCrypto `RSA-PSS` signing + a well-formed
+ *      `FIREBASE_SERVICE_ACCOUNT_JSON` env var — e.g. paid Vercel + Pro, or
+ *      a Node VPS).
+ *   3. Caller's own Firebase ID token (`x-id-token` request header). This is
+ *      the **Vercel Hobby / free-tier path**. The server just proxies Firestore
+ *      operations AS the signed-in user, and Firestore rules enforce role
+ *      access (staff-only collections, per-student row isolation, etc.).
+ *
+ * Fallback (3) means no Pro plan is required and no RSA signing is needed on
+ * the server; the rules in `firestore.rules` provide the security boundary.
+ */
 async function accessToken(): Promise<string> {
   if (tokenCache && tokenCache.expiresAt > Date.now() + 60_000) return tokenCache.token;
 
+  const userToken = getRequestHeader("x-id-token") ?? "";
+
   const raw = process.env["FIREBASE_SERVICE_ACCOUNT_JSON"];
-  if (!raw) {
-    // No service account → use the signed-in user's own ID token (dev fallback).
-    const userToken = getRequestHeader("x-id-token") ?? "";
-    if (!userToken) {
-      throw new Error(
-        "FIREBASE_SERVICE_ACCOUNT_JSON is not configured. Sign in again, or set the variable in .env.",
+  if (raw) {
+    try {
+      const sa = serviceAccount();
+      const iat = Math.floor(Date.now() / 1000);
+      const header = b64url(new TextEncoder().encode(JSON.stringify({ alg: "RS256", typ: "JWT" })));
+      const claims = b64url(
+        new TextEncoder().encode(
+          JSON.stringify({
+            iss: sa.client_email,
+            scope: "https://www.googleapis.com/auth/datastore",
+            aud: "https://oauth2.googleapis.com/token",
+            iat,
+            exp: iat + 3600,
+          }),
+        ),
+      );
+      const key = await crypto.subtle.importKey(
+        "pkcs8",
+        pemToDer(sa.private_key.replace(/\\n/g, "\n")),
+        { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+        false,
+        ["sign"],
+      );
+      const signature = await crypto.subtle.sign(
+        "RSASSA-PKCS1-v1_5",
+        key,
+        new TextEncoder().encode(`${header}.${claims}`),
+      );
+      const jwt = `${header}.${claims}.${b64url(signature)}`;
+
+      const res = await fetch("https://oauth2.googleapis.com/token", {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+          assertion: jwt,
+        }),
+      });
+      if (res.ok) {
+        const json = (await res.json()) as { access_token: string; expires_in: number };
+        tokenCache = {
+          token: json.access_token,
+          expiresAt: Date.now() + json.expires_in * 1000,
+        };
+        return json.access_token;
+      }
+      // SA flow failed — fall through to user-token mode below instead of
+      // crashing. Log a diagnostic so operators can see why it failed.
+      console.warn(
+        `[fb-admin] Service-account token exchange failed (${res.status}); ` +
+          `falling back to caller x-id-token mode.`,
+      );
+    } catch (err) {
+      // Anything missing in the SA path (no crypto.subtle on edge, RSA key
+      // import errors, malformed PEM, network outage to Google…) is not fatal
+      // — we still have the user's token and Firestore rules.
+      console.warn(
+        `[fb-admin] Service-account auth unavailable (${
+          (err as Error | undefined)?.message ?? String(err)
+        }); falling back to caller x-id-token mode.`,
       );
     }
-    return userToken;
   }
 
-  const sa = serviceAccount();
-  const iat = Math.floor(Date.now() / 1000);
-  const header = b64url(new TextEncoder().encode(JSON.stringify({ alg: "RS256", typ: "JWT" })));
-  const claims = b64url(
-    new TextEncoder().encode(
-      JSON.stringify({
-        iss: sa.client_email,
-        scope: "https://www.googleapis.com/auth/datastore",
-        aud: "https://oauth2.googleapis.com/token",
-        iat,
-        exp: iat + 3600,
-      }),
-    ),
-  );
-  const key = await crypto.subtle.importKey(
-    "pkcs8",
-    pemToDer(sa.private_key.replace(/\\n/g, "\n")),
-    { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
-    false,
-    ["sign"],
-  );
-  const signature = await crypto.subtle.sign(
-    "RSASSA-PKCS1-v1_5",
-    key,
-    new TextEncoder().encode(`${header}.${claims}`),
-  );
-  const jwt = `${header}.${claims}.${b64url(signature)}`;
+  // ── Vercel Hobby / no-service-account path ──────────────────────────
+  if (userToken) return userToken;
 
-  const res = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
-      assertion: jwt,
-    }),
-  });
-  if (!res.ok) throw new Error(`Firebase auth failed: ${res.status} ${await res.text()}`);
-  const json = (await res.json()) as { access_token: string; expires_in: number };
-  tokenCache = { token: json.access_token, expiresAt: Date.now() + json.expires_in * 1000 };
-  return json.access_token;
+  throw new Error(
+    "FIREBASE_SERVICE_ACCOUNT_JSON is not configured and no caller x-id-token " +
+      "is present on the request. Either (a) set FIREBASE_SERVICE_ACCOUNT_JSON, " +
+      "or (b) ensure the browser client is signed in via Firebase Auth so the " +
+      "admin dashboard attaches an x-id-token header.",
+  );
 }
 
 /* --------------------------- value (de)serialisation --------------------------- */
@@ -301,9 +342,7 @@ function resolveFirebaseApiKey(): string | undefined {
   if (direct) return direct;
 
   if (typeof import.meta !== "undefined") {
-    const env = (
-      import.meta as unknown as Record<string, Record<string, string> | undefined>
-    ).env;
+    const env = (import.meta as unknown as Record<string, Record<string, string> | undefined>).env;
     if (env) {
       const vite = env["VITE_FIREBASE_API_KEY"] ?? env["FIREBASE_API_KEY"] ?? env["GOOGLE_API_KEY"];
       if (vite) return vite;
@@ -371,7 +410,12 @@ export type SystemDiagnostics = {
   serviceAccountValid: boolean;
   projectId: string | null;
   apiKeySet: boolean;
-  tokenAcquired: boolean;
+  /**
+   * `tokenMode === "service-account"` = full privileged SA OAuth token (Pro).
+   * `tokenMode === "user-token"` = caller's x-id-token (Vercel Hobby / no SA).
+   * `tokenMode === "none"` = neither mechanism could produce a token.
+   */
+  tokenMode: "service-account" | "user-token" | "none";
   firestoreReachable: boolean;
 };
 
@@ -384,31 +428,52 @@ export async function systemDiagnostics(): Promise<SystemDiagnostics> {
   const out: SystemDiagnostics = {
     serviceAccountSet: false,
     serviceAccountValid: false,
-    projectId: null,
+    projectId: projectId(),
     apiKeySet: Boolean(apiKey),
-    tokenAcquired: false,
+    tokenMode: "none",
     firestoreReachable: false,
   };
 
   const raw = process.env["FIREBASE_SERVICE_ACCOUNT_JSON"];
   out.serviceAccountSet = Boolean(raw);
-  if (!raw) return out;
-
-  let sa: ServiceAccount;
-  try {
-    sa = JSON.parse(raw) as ServiceAccount;
-  } catch {
-    return out; // invalid JSON → invalid
+  let sa: ServiceAccount | null = null;
+  if (raw) {
+    try {
+      sa = JSON.parse(raw) as ServiceAccount;
+      out.serviceAccountValid = Boolean(sa.private_key && sa.client_email && sa.project_id);
+      if (out.serviceAccountValid) out.projectId = sa.project_id ?? null;
+    } catch {
+      sa = null;
+    }
   }
-  out.serviceAccountValid = Boolean(sa.private_key && sa.client_email && sa.project_id);
-  out.projectId = sa.project_id ?? null;
-  if (!out.serviceAccountValid) return out;
 
+  // ── Token acquisition attempt ──────────────────────────────────────
   try {
-    await accessToken();
-    out.tokenAcquired = true;
+    // accessToken() already tries SA first, then falls back to x-id-token.
+    // To figure out which one it actually used, check:
+    //   1. Is a SA token in cache AND still valid (accessToken returns cached)?
+    //   2. Otherwise, did we successfully use the user token?
+    // We short-circuit by emulating the logic cheaply (matches accessToken).
+    const userToken = getRequestHeader("x-id-token") ?? "";
+    const couldUseSA =
+      out.serviceAccountValid &&
+      (tokenCache && tokenCache.expiresAt > Date.now() + 60_000 ? true : sa !== null);
+
+    // Actually try to get a token (may use cache, SA, or user-token fallback).
+    const tok = await accessToken();
+    if (couldUseSA && tok && tok.startsWith("ya29.")) {
+      // Google OAuth access tokens (SA mode) all start with ya29.
+      out.tokenMode = "service-account";
+    } else if (tok && userToken && tok === userToken) {
+      // Same token we read from x-id-token header == user-token mode.
+      out.tokenMode = "user-token";
+    } else if (tok) {
+      // Couldn't distinguish; assume user-token fallback (safe, SA was either
+      // not configured or failed earlier).
+      out.tokenMode = sa && out.serviceAccountValid ? "service-account" : "user-token";
+    }
   } catch {
-    return out;
+    // accessToken() threw → keep out.tokenMode = "none".
   }
 
   try {

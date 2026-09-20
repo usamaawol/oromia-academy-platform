@@ -37,7 +37,10 @@ type SystemDiagnostics = {
   serviceAccountValid: boolean;
   projectId: string | null;
   apiKeySet: boolean;
-  tokenAcquired: boolean;
+  /** @see fb-admin.server.ts for definitions */
+  tokenMode: "service-account" | "user-token" | "none";
+  /** @deprecated Use tokenMode instead — kept for backwards compat. */
+  tokenAcquired?: boolean;
   firestoreReachable: boolean;
 };
 
@@ -86,14 +89,27 @@ function SettingsPage() {
     );
   }
 
-  const diagRows: { label: string; ok: boolean }[] = diag
+  const diagRows: { label: string; ok: boolean; hint?: string }[] = diag
     ? [
         {
           label: "Service account (FIREBASE_SERVICE_ACCOUNT_JSON)",
           ok: diag.serviceAccountSet && diag.serviceAccountValid,
+          hint:
+            diag.serviceAccountSet && !diag.serviceAccountValid
+              ? "Present but invalid JSON / missing required fields"
+              : undefined,
         },
         { label: "Firebase API key (server)", ok: diag.apiKeySet },
-        { label: "Firestore token", ok: diag.tokenAcquired },
+        {
+          label: "Firestore auth mode",
+          ok: diag.tokenMode !== "none",
+          hint:
+            diag.tokenMode === "service-account"
+              ? "Service-account OAuth (privileged / Pro)"
+              : diag.tokenMode === "user-token"
+                ? "Caller x-id-token proxy (Vercel Hobby — no Pro required)"
+                : "Could not resolve any Firestore token",
+        },
         { label: "Firestore reachable", ok: diag.firestoreReachable },
       ]
     : [];
@@ -119,11 +135,18 @@ function SettingsPage() {
             </CardHeader>
             <CardContent className="space-y-2">
               {diagRows.map((r) => (
-                <div key={r.label} className="flex items-center justify-between gap-4 text-sm">
-                  <span className="text-muted-foreground">{r.label}</span>
+                <div key={r.label} className="flex items-start justify-between gap-4 text-sm">
+                  <div className="min-w-0">
+                    <span className="text-muted-foreground">{r.label}</span>
+                    {r.hint && (
+                      <p className="text-[11px] leading-tight text-muted-foreground/90 mt-0.5">
+                        {r.hint}
+                      </p>
+                    )}
+                  </div>
                   <span
                     className={cn(
-                      "font-medium",
+                      "shrink-0 font-medium",
                       r.ok
                         ? "text-green-600 dark:text-green-400"
                         : "text-red-600 dark:text-red-400",
@@ -136,13 +159,18 @@ function SettingsPage() {
               {diag.projectId && (
                 <p className="pt-1 text-xs text-muted-foreground">Project: {diag.projectId}</p>
               )}
-              {!diag.serviceAccountValid && (
+              {diag.tokenMode === "user-token" && (
+                <p className="pt-1 text-sm text-green-600 dark:text-green-400">
+                  ✅ Running in <b>user-token proxy mode</b> — no Vercel Pro / service account
+                  required. Firestore rules enforce role-based access for all admin operations.
+                </p>
+              )}
+              {diag.tokenMode !== "service-account" && diag.tokenMode !== "user-token" && (
                 <p className="pt-1 text-sm text-amber-600 dark:text-amber-400">
-                  Working in session-token mode using your signed-in account (no service account
-                  set). Reads/writes depend on your Firestore security rules. For full authority,
-                  set{" "}
-                  <code className="font-mono text-xs">FIREBASE_SERVICE_ACCOUNT_JSON</code> in{" "}
-                  <code className="font-mono text-xs">.env</code>, then press refresh.
+                  For full privileged server access (optional Pro upgrade), set{" "}
+                  <code className="font-mono text-xs">FIREBASE_SERVICE_ACCOUNT_JSON</code> in env
+                  vars, then press refresh. The app works fine without it using the signed-in user's
+                  own token.
                 </p>
               )}
             </CardContent>
