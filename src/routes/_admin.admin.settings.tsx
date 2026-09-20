@@ -10,8 +10,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, Trophy, Eye, EyeOff } from "lucide-react";
 import { useI18n } from "@/i18n";
 import { adminDiagnostics, adminGetSettings, adminSaveSettings } from "@/lib/server-fns";
 import { serverErrorMessage } from "@/lib/server-error";
@@ -30,6 +31,7 @@ const DEFAULT: AcademySettings = {
   announcementEn: "",
   contactEmail: "",
   contactPhone: "",
+  rankingsPublished: false,
 };
 
 type SystemDiagnostics = {
@@ -243,6 +245,69 @@ function SettingsPage() {
                 value={settings.contactPhone}
                 onChange={(e) => set("contactPhone", e.target.value)}
               />
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className={cn(
+          settings.rankingsPublished
+            ? "border-green-500/40 bg-green-500/5 dark:bg-green-900/10"
+            : "border-border"
+        )}>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Trophy className="size-5 text-primary" />
+              Leaderboard & Rankings
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-5">
+            <div className="flex items-start justify-between gap-4 rounded-lg bg-muted/50 p-4">
+              <div className="flex-1 space-y-1">
+                <div className="flex items-center gap-2">
+                  <Label
+                    htmlFor="rankings-publish"
+                    className="text-base font-semibold cursor-pointer"
+                  >
+                    Publish student rankings
+                  </Label>
+                  {settings.rankingsPublished ? (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-[11px] font-semibold text-green-700 dark:bg-green-900/40 dark:text-green-400">
+                      <Eye className="size-3" /> LIVE
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[11px] font-semibold text-muted-foreground">
+                      <EyeOff className="size-3" /> DRAFT
+                    </span>
+                  )}
+                </div>
+                <p className="text-sm text-muted-foreground leading-relaxed">
+                  When enabled, students can view the full leaderboard anonymously.
+                  Each student sees their nickname instead of their real name for privacy.
+                  Students always see their own rank even when unpublished.
+                </p>
+              </div>
+              <Switch
+                id="rankings-publish"
+                checked={settings.rankingsPublished}
+                onCheckedChange={(v) => set("rankingsPublished", v)}
+              />
+            </div>
+            <div className="rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground space-y-2">
+              <p className="font-medium text-foreground/80">💡 Privacy note</p>
+              <ul className="list-disc list-inside space-y-1 text-[13px]">
+                <li>
+                  <b>Published:</b> All students see the leaderboard with nicknames.
+                  Real names and emails are never shown to other students.
+                </li>
+                <li>
+                  <b>Unpublished:</b> Students only see their own personal rank.
+                  Nobody else can see their position.
+                </li>
+                <li>
+                  <b>Admins &amp; Owners:</b> Always see the full leaderboard with real names
+                  and contact info, regardless of this setting.
+                </li>
+              </ul>
             </div>
           </CardContent>
         </Card>

@@ -10,6 +10,7 @@ import {
   ChevronRight,
   Clock3,
   Download,
+  FileText,
   Flag,
   Lock,
   Maximize,
@@ -162,6 +163,34 @@ function ExamEntryPage() {
                   <p className="whitespace-pre-line text-sm text-muted-foreground">
                     {examInfo.instructions}
                   </p>
+                </div>
+              )}
+
+              {/* Exam Paper PDF */}
+              {(examInfo as { pdfUrl?: string; pdfName?: string }).pdfUrl && (
+                <div className="rounded-xl border bg-muted/40 p-4">
+                  <div className="flex items-start gap-3">
+                    <div className="grid size-10 shrink-0 place-items-center rounded-lg bg-primary/10">
+                      <FileText className="size-5 text-primary" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h3 className="font-semibold text-sm">Exam Paper PDF</h3>
+                      <p className="text-xs text-muted-foreground mt-0.5 truncate">
+                        {(examInfo as { pdfUrl?: string; pdfName?: string }).pdfName ?? "exam-paper.pdf"}
+                      </p>
+                    </div>
+                    <a
+                      href={(examInfo as { pdfUrl?: string; pdfName?: string }).pdfUrl}
+                      download={(examInfo as { pdfUrl?: string; pdfName?: string }).pdfName ?? "exam-paper.pdf"}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      <Button variant="outline" size="sm" className="gap-1.5">
+                        <Download className="size-4" />
+                        Download
+                      </Button>
+                    </a>
+                  </div>
                 </div>
               )}
 
@@ -554,6 +583,7 @@ function SubmittedScreen({
   const [result, setResult] = useState<ResultView | { published: false } | null>(null);
   const [loading, setLoading] = useState(true);
   const { lang } = useI18n();
+  const { isStaff } = useAuth();
 
   useEffect(() => {
     if (!attemptId) { setLoading(false); return; }
@@ -773,8 +803,8 @@ function SubmittedScreen({
               Download Result
             </Button>
           )}
-          <Button onClick={() => void navigate({ to: "/dashboard" })}>
-            Back to Dashboard
+          <Button onClick={() => void navigate({ to: isStaff ? "/admin" : "/dashboard" } as { to: "/admin" | "/dashboard" })}>
+            {isStaff ? "Back to Admin Panel" : "Back to Dashboard"}
           </Button>
         </div>
       </main>

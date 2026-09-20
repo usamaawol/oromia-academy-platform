@@ -62,6 +62,8 @@ export const om = {
   "common.settings": "Qindaa'ina",
   "common.notifications": "Beeksisa",
   "common.dashboard": "Daashboordii",
+  "common.rankings": "Sadarkaa",
+  "common.leaderboard": "Sadarkaa Barattoota",
 
   // nav
   "nav.home": "Fuula Duraa",
@@ -388,6 +390,8 @@ export const en: Record<TranslationKey, string> = {
   "common.settings": "Settings",
   "common.notifications": "Notifications",
   "common.dashboard": "Dashboard",
+  "common.rankings": "Rankings",
+  "common.leaderboard": "Student Leaderboard",
 
   "nav.home": "Home",
   "nav.courses": "Courses",

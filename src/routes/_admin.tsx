@@ -3,6 +3,7 @@
  */
 import { createFileRoute, Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
 import {
+  Award,
   BarChart3,
   BookOpen,
   ClipboardList,
@@ -34,10 +35,11 @@ export const Route = createFileRoute("/_admin")({
 
 const NAV_ITEMS = [
   { to: "/admin/students", label: "admin.students", icon: Users },
+  { to: "/admin/rankings", label: "common.rankings", icon: Trophy },
   { to: "/admin/courses", label: "admin.courses", icon: BookOpen },
   { to: "/admin/questions", label: "admin.questions", icon: ClipboardList },
   { to: "/admin/exams", label: "admin.exams", icon: GraduationCap },
-  { to: "/admin/results", label: "admin.grading", icon: Trophy },
+  { to: "/admin/results", label: "admin.grading", icon: Award },
   { to: "/admin/analytics", label: "admin.analytics", icon: BarChart3 },
   { to: "/admin/audit", label: "admin.audit", icon: History },
   { to: "/admin/settings", label: "common.settings", icon: Settings },
@@ -62,7 +64,11 @@ function AdminLayout() {
       <div className="flex min-h-screen items-center justify-center bg-background">
         <div className="flex flex-col items-center gap-4">
           <div className="grid size-12 place-items-center rounded-2xl bg-primary/10">
-            <GraduationCap className="size-6 text-primary animate-pulse" />
+            <img
+              src="/favicon.ico"
+              alt="Logo"
+              className="size-6 object-contain animate-pulse"
+            />
           </div>
           <div className="h-1 w-32 overflow-hidden rounded-full bg-muted">
             <div className="h-full w-1/2 animate-[slide_1s_ease-in-out_infinite] rounded-full bg-primary" />
@@ -99,9 +105,11 @@ function AdminLayout() {
       >
         {/* Logo */}
         <div className="flex h-16 items-center gap-3 border-b border-border/60 px-5">
-          <div className="grid size-9 shrink-0 place-items-center rounded-xl bg-primary shadow-glow">
-            <GraduationCap className="size-5 text-primary-foreground" />
-          </div>
+          <img
+            src="/favicon.ico"
+            alt="Logo"
+            className="size-9 shrink-0 rounded-xl object-contain shadow-glow"
+          />
           <div className="min-w-0 flex-1">
             <p className="truncate font-bold text-sm leading-tight">{t("common.academy")}</p>
             <div className="flex items-center gap-1 mt-0.5">
@@ -208,9 +216,11 @@ function AdminLayout() {
             <Menu className="size-5" />
           </Button>
           <div className="flex items-center gap-2">
-            <div className="grid size-7 place-items-center rounded-lg bg-primary">
-              <GraduationCap className="size-4 text-primary-foreground" />
-            </div>
+            <img
+              src="/favicon.ico"
+              alt="Logo"
+              className="size-7 rounded-lg object-contain"
+            />
             <span className="font-semibold text-sm">{t("admin.title")}</span>
           </div>
         </div>

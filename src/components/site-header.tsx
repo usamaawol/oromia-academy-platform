@@ -17,7 +17,8 @@ export function SiteHeader() {
 
   const links: { to: string; label: string }[] = [
     { to: "/", label: t("nav.home") },
-    ...(user ? [{ to: "/dashboard", label: t("nav.dashboard") }] : []),
+    { to: "/about", label: t("nav.about") },
+    ...(user && !isStaff ? [{ to: "/dashboard", label: t("nav.dashboard") }] : []),
     ...(isStaff ? [{ to: "/admin", label: t("nav.admin") }] : []),
   ];
 
@@ -31,9 +32,11 @@ export function SiteHeader() {
       <header className="sticky top-0 z-40 border-b border-border/70 bg-background/85 backdrop-blur">
         <div className="mx-auto flex h-16 w-full max-w-6xl items-center gap-3 px-4">
           <Link to="/" className="flex items-center gap-2">
-            <span className="grid size-9 place-items-center rounded-xl bg-primary text-primary-foreground shadow-glow">
-              <GraduationCap className="size-5" />
-            </span>
+            <img
+              src="/favicon.ico"
+              alt="Logo"
+              className="size-9 rounded-xl object-contain shadow-glow"
+            />
             <span className="text-base font-bold tracking-tight">{t("common.academy")}</span>
           </Link>
 

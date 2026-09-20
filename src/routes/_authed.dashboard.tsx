@@ -17,6 +17,10 @@ import {
   Medal,
   Download,
   Save,
+  Crown,
+  TrendingUp,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -54,6 +58,7 @@ import { listNotifications } from "@/lib/data";
 import type { AppNotification } from "@/lib/types";
 import { getFirebaseAuth, firebaseReady } from "@/lib/firebase";
 import { onAuthStateChanged } from "firebase/auth";
+import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_authed/dashboard")({
   head: () => ({
@@ -65,16 +70,24 @@ export const Route = createFileRoute("/_authed/dashboard")({
   component: DashboardPage,
 });
 
-type Tab = "overview" | "exams" | "attempts" | "results" | "profile";
+type Tab = "overview" | "exams" | "attempts" | "results" | "profile" | "ranking";
 
 type RankingItem = {
-  id: string;
-  fullName: string;
-  email: string;
+  id: string | null;
+  fullName?: string;
+  email?: string;
+  nickname: string;
   avgScore: number;
   examCount: number;
-  totalScore: number;
+  totalScore?: number;
   rank: number;
+};
+
+type RankingsResponse = {
+  all: RankingItem[];
+  rankingsPublished: boolean;
+  isStaff: boolean;
+  myRank: RankingItem | null;
 };
 
 function DashboardPage() {
@@ -88,6 +101,8 @@ function DashboardPage() {
   const [attempts, setAttempts] = useState<Attempt[]>([]);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [rankings, setRankings] = useState<RankingItem[]>([]);
+  const [rankingsPublished, setRankingsPublished] = useState(false);
+  const [myRank, setMyRank] = useState<RankingItem | null>(null);
   const [loading, setLoading] = useState(true);
   const [editingProfile, setEditingProfile] = useState(false);
   const [profileForm, setProfileForm] = useState({
@@ -120,16 +135,19 @@ function DashboardPage() {
           }
         }
 
-        const [e, a, n, r] = await Promise.all([
+        const [e, a, n, rRaw] = await Promise.all([
           call(availableExams, undefined),
           call(myAttempts, undefined),
           listNotifications(user.uid),
           call(getRankings, undefined),
         ]);
+        const r = rRaw as RankingsResponse;
         setExams(e as Exam[]);
         setAttempts(a as Attempt[]);
         setNotifications(n as AppNotification[]);
-        setRankings(r as RankingItem[]);
+        setRankings(r.all);
+        setRankingsPublished(r.rankingsPublished);
+        setMyRank(r.myRank);
       } catch (err) {
         console.error(err);
         // Suppress session-expired toasts on first load — token may still be
@@ -147,7 +165,6 @@ function DashboardPage() {
 
   const completedAttempts = attempts.filter((a) => a.status !== "in_progress");
   const publishedResults = attempts.filter((a) => a.published);
-  const myRank = rankings.find((r) => r.id === user?.uid);
 
   const handleSaveProfile = async () => {
     try {
@@ -318,6 +335,20 @@ function DashboardPage() {
                         <span>My Info</span>
                       </SidebarMenuButton>
                     </SidebarMenuItem>
+                    <SidebarMenuItem>
+                      <SidebarMenuButton
+                        isActive={activeTab === "ranking"}
+                        onClick={() => setActiveTab("ranking")}
+                      >
+                        <Trophy />
+                        <span>My Ranking</span>
+                        {myRank && (
+                          <Badge variant="secondary" className="ml-auto">
+                            #{myRank.rank}
+                          </Badge>
+                        )}
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
                   </SidebarMenu>
                 </SidebarGroupContent>
               </SidebarGroup>
@@ -325,13 +356,52 @@ function DashboardPage() {
                 <SidebarGroupLabel>Rankings</SidebarGroupLabel>
                 <SidebarGroupContent>
                   <div className="px-2 py-2">
-                    {myRank && (
-                      <div className="flex items-center gap-2 rounded-lg bg-accent p-2">
-                        <Medal className="size-4 text-yellow-500" />
-                        <div className="flex flex-col">
-                          <span className="text-xs font-semibold">Your Rank</span>
-                          <span className="text-lg font-bold">#{myRank.rank}</span>
+                    {myRank ? (
+                      <div className="rounded-xl border border-primary/30 bg-gradient-to-br from-primary/10 via-accent/50 to-accent p-4 shadow-soft">
+                        <div className="flex items-center gap-3">
+                          <div className="grid size-12 shrink-0 place-items-center rounded-2xl bg-gradient-to-br from-primary to-primary-glow text-primary-foreground shadow-glow">
+                            {myRank.rank === 1 ? (
+                              <Crown className="size-6" />
+                            ) : myRank.rank <= 3 ? (
+                              <Medal className="size-6" />
+                            ) : (
+                              <TrendingUp className="size-6" />
+                            )}
+                          </div>
+                          <div className="flex flex-col min-w-0 flex-1">
+                            <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                              {rankingsPublished ? "Public Rank" : "Your Rank"}
+                            </span>
+                            <span className="text-3xl font-black leading-none mt-0.5">
+                              #{myRank.rank}
+                            </span>
+                            <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                              <span className="inline-flex items-center gap-1">
+                                {rankingsPublished ? (
+                                  <><Eye className="size-3" /> Public</>
+                                ) : (
+                                  <><EyeOff className="size-3" /> Private</>
+                                )}
+                              </span>
+                              <span>•</span>
+                              <span>{myRank.avgScore}% avg</span>
+                              <span>•</span>
+                              <span>{myRank.examCount} exam{myRank.examCount !== 1 ? "s" : ""}</span>
+                            </div>
+                          </div>
                         </div>
+                        {!rankingsPublished && (
+                          <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground/90 border-t border-border/50 pt-3">
+                            Rankings are not yet published by the admin. Only you can see your rank.
+                          </p>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="rounded-lg border border-dashed border-border p-3 text-center">
+                        <Trophy className="mx-auto size-5 text-muted-foreground/50" />
+                        <p className="mt-1.5 text-xs text-muted-foreground">
+                          Complete and publish exams to get your rank
+                        </p>
                       </div>
                     )}
                   </div>
@@ -827,6 +897,217 @@ function DashboardPage() {
                     </div>
                   </CardContent>
                 </Card>
+              </section>
+            )}
+
+            {activeTab === "ranking" && (
+              <section>
+                <div className="mb-6 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h2 className="text-2xl font-bold flex items-center gap-2">
+                      <Trophy className="size-6 text-primary" />
+                      Student Rankings
+                    </h2>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      {rankingsPublished
+                        ? "Global rankings are published — compete fairly!"
+                        : "Only you can view your rank. Admin may publish rankings soon."}
+                    </p>
+                  </div>
+                  <Badge
+                    variant={rankingsPublished ? "default" : "secondary"}
+                    className="w-fit flex items-center gap-1"
+                  >
+                    {rankingsPublished ? (
+                      <><Eye className="size-3" /> Published</>
+                    ) : (
+                      <><EyeOff className="size-3" /> Private</>
+                    )}
+                  </Badge>
+                </div>
+
+                {myRank && (
+                  <Card className="mb-6 overflow-hidden border-primary/30 bg-gradient-to-br from-primary/5 via-background to-background">
+                    <CardContent className="p-0">
+                      <div className="grid md:grid-cols-[1fr_auto] gap-6 p-6 md:p-8">
+                        <div className="flex items-start gap-5">
+                          <div className="grid size-20 shrink-0 place-items-center rounded-3xl bg-gradient-to-br from-primary to-primary-glow text-primary-foreground shadow-glow">
+                            {myRank.rank === 1 ? (
+                              <Crown className="size-10" />
+                            ) : myRank.rank <= 3 ? (
+                              <Medal className="size-10" />
+                            ) : (
+                              <TrendingUp className="size-10" />
+                            )}
+                          </div>
+                          <div>
+                            <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                              Your Position
+                            </p>
+                            <div className="mt-1 flex items-baseline gap-3">
+                              <span className="text-6xl font-black leading-none tracking-tight">
+                                #{myRank.rank}
+                              </span>
+                              <span className="text-lg font-semibold text-muted-foreground">
+                                of {rankingsPublished ? rankings.length : "all students"}
+                              </span>
+                            </div>
+                            <div className="mt-4 flex flex-wrap gap-4 text-sm">
+                              <div className="flex items-center gap-2 rounded-full bg-muted px-3 py-1.5">
+                                <Award className="size-4 text-primary" />
+                                <span>
+                                  <span className="font-bold">{myRank.avgScore}%</span> average
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-2 rounded-full bg-muted px-3 py-1.5">
+                                <ClipboardCheck className="size-4 text-primary" />
+                                <span>
+                                  <span className="font-bold">{myRank.examCount}</span> completed
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-2 rounded-full bg-muted px-3 py-1.5">
+                                <span className="text-sm font-semibold">
+                                  {myRank.rank === 1 ? "🏆 Top Performer!" :
+                                    myRank.rank <= 3 ? "🎯 Top 3!" :
+                                    myRank.rank <= 10 ? "⭐ Top 10!" :
+                                    "💪 Keep going!"}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {!rankingsPublished && (
+                  <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 dark:border-amber-800/50 dark:bg-amber-950/20 p-5">
+                    <div className="flex items-start gap-4">
+                      <div className="grid size-10 shrink-0 place-items-center rounded-xl bg-amber-100 dark:bg-amber-900/40">
+                        <EyeOff className="size-5 text-amber-600 dark:text-amber-400" />
+                      </div>
+                      <div className="flex-1">
+                        <p className="font-semibold text-amber-900 dark:text-amber-300">
+                          Rankings are currently private
+                        </p>
+                        <p className="mt-1 text-sm text-amber-800/90 dark:text-amber-300/80">
+                          Only you can see your rank. When the academy admin publishes the official
+                          leaderboard, you&apos;ll be able to compare yourself with other students
+                          using anonymous nicknames.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {rankingsPublished && rankings.length > 0 ? (
+                  <Card>
+                    <CardContent className="p-0">
+                      <div className="rounded-lg border">
+                        <table className="w-full text-sm">
+                          <thead className="border-b bg-muted/50">
+                            <tr>
+                              <th className="px-4 py-3 text-left w-20 font-medium text-muted-foreground">
+                                Rank
+                              </th>
+                              <th className="px-4 py-3 text-left font-medium text-muted-foreground">
+                                Student
+                              </th>
+                              <th className="hidden px-4 py-3 text-left font-medium text-muted-foreground sm:table-cell">
+                                Exams
+                              </th>
+                              <th className="px-4 py-3 text-right font-medium text-muted-foreground">
+                                Avg Score
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y">
+                            {rankings.map((r) => {
+                              const isMe = r.id === user?.uid;
+                              return (
+                                <tr
+                                  key={r.rank + "-" + r.nickname}
+                                  className={isMe ? "bg-primary/5 dark:bg-primary/10" : "hover:bg-muted/30"}
+                                >
+                                  <td className="px-4 py-3">
+                                    <div className="flex items-center gap-2">
+                                      <span
+                                        className={cn(
+                                          "grid size-8 place-items-center rounded-lg text-sm font-black",
+                                          r.rank === 1
+                                            ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-400"
+                                            : r.rank === 2
+                                              ? "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300"
+                                              : r.rank === 3
+                                                ? "bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-400"
+                                                : "bg-muted text-muted-foreground",
+                                        )}
+                                      >
+                                        {r.rank}
+                                      </span>
+                                    </div>
+                                  </td>
+                                  <td className="px-4 py-3">
+                                    <div className="flex items-center gap-3">
+                                      <div
+                                        className={cn(
+                                          "grid size-9 shrink-0 place-items-center rounded-full text-sm font-bold",
+                                          isMe
+                                            ? "bg-primary text-primary-foreground"
+                                            : "bg-muted text-muted-foreground",
+                                        )}
+                                      >
+                                        {r.nickname[0]?.toUpperCase() ?? "?"}
+                                      </div>
+                                      <div>
+                                        <span className="font-semibold">
+                                          {r.nickname}
+                                          {isMe && (
+                                            <Badge variant="outline" className="ml-2 border-primary/50 text-primary text-[10px] h-5">
+                                              YOU
+                                            </Badge>
+                                          )}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  </td>
+                                  <td className="hidden px-4 py-3 text-muted-foreground sm:table-cell">
+                                    {r.examCount}
+                                  </td>
+                                  <td className="px-4 py-3 text-right">
+                                    <span
+                                      className={cn(
+                                        "font-bold",
+                                        r.avgScore >= 80
+                                          ? "text-green-600 dark:text-green-400"
+                                          : r.avgScore >= 50
+                                            ? "text-amber-600 dark:text-amber-400"
+                                            : "text-red-600 dark:text-red-400",
+                                      )}
+                                    >
+                                      {r.avgScore}%
+                                    </span>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ) : rankingsPublished && rankings.length === 0 ? (
+                  <Card>
+                    <CardContent className="p-10 text-center">
+                      <Trophy className="mx-auto size-10 text-muted-foreground/40" />
+                      <p className="mt-3 font-semibold">No rankings yet</p>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        Complete some published exams to appear on the leaderboard.
+                      </p>
+                    </CardContent>
+                  </Card>
+                ) : null}
               </section>
             )}
           </main>

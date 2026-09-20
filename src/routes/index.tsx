@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { ArrowRight, Bot, CheckCircle2, Clock3, Send, Sparkles, WifiOff } from "lucide-react";
+import { ArrowRight, Bot, CheckCircle2, Clock3, Info, Send, Sparkles, WifiOff } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { SiteHeader } from "@/components/site-header";
@@ -55,6 +55,12 @@ function Index() {
                 </Button>
                 <Button asChild size="lg" variant="outline" className="border-primary-foreground/30 bg-transparent text-primary-foreground hover:bg-primary-foreground/10 hover:text-primary-foreground">
                   <a href="#courses">{t("landing.ctaSecondary")}</a>
+                </Button>
+                <Button asChild size="lg" variant="outline" className="border-primary-foreground/30 bg-transparent text-primary-foreground hover:bg-primary-foreground/10 hover:text-primary-foreground">
+                  <Link to="/about">
+                    <Info className="mr-2 size-5" />
+                    {t("nav.about")}
+                  </Link>
                 </Button>
               </div>
             </div>

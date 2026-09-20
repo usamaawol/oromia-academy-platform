@@ -1,8 +1,9 @@
 /**
  * Layout route that redirects unauthenticated users to /auth.
  * All protected pages nest under this route.
+ * Staff users (owner/admin/instructor) are redirected to the admin panel.
  */
-import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
+import { createFileRoute, Outlet } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { useAuth } from "@/lib/auth";
 import { useNavigate } from "@tanstack/react-router";
@@ -12,14 +13,17 @@ export const Route = createFileRoute("/_authed")({
 });
 
 function AuthedLayout() {
-  const { user, loading } = useAuth();
+  const { user, isStaff, loading } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
-    if (!loading && !user) {
+    if (loading) return;
+    if (!user) {
       void navigate({ to: "/auth" });
+    } else if (isStaff) {
+      void navigate({ to: "/admin" });
     }
-  }, [user, loading, navigate]);
+  }, [user, isStaff, loading, navigate]);
 
   if (loading) {
     return (
@@ -29,7 +33,7 @@ function AuthedLayout() {
     );
   }
 
-  if (!user) return null;
+  if (!user || isStaff) return null;
 
   return <Outlet />;
 }

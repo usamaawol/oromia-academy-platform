@@ -17,7 +17,7 @@ export default defineConfig({
     VitePWA({
       registerType: "autoUpdate",
       injectRegister: false, // we register via virtual:pwa-register in client code
-      includeAssets: ["favicon.ico", "apple-touch-icon.png"],
+      includeAssets: ["favicon.ico", "apple-touch-icon.png", "icon-192.png", "icon-512.png", "icon-maskable-512.png"],
       // TanStack Start + nitro tunnel the client build into .output/public, so
       // emit sw.js/manifest there too and precache the real assets inside it.
       outDir: ".output/public",
@@ -35,6 +35,9 @@ export default defineConfig({
         theme_color: "#13795f",
         categories: ["education", "productivity"],
         icons: [
+          { src: "/favicon.ico", sizes: "16x16 32x32 48x48 64x64 128x128 256x256", type: "image/x-icon" },
+          { src: "/favicon.ico", sizes: "192x192", type: "image/x-icon", purpose: "any maskable" },
+          { src: "/favicon.ico", sizes: "512x512", type: "image/x-icon", purpose: "any maskable" },
           { src: "/icon-192.png", sizes: "192x192", type: "image/png" },
           { src: "/icon-512.png", sizes: "512x512", type: "image/png" },
           {
@@ -49,13 +52,13 @@ export default defineConfig({
             name: "Dashboard",
             short_name: "Dash",
             url: "/dashboard",
-            icons: [{ src: "/icon-192.png", sizes: "192x192", type: "image/png" }],
+            icons: [{ src: "/favicon.ico", sizes: "192x192", type: "image/x-icon" }],
           },
           {
             name: "Admin",
             short_name: "Admin",
             url: "/admin",
-            icons: [{ src: "/icon-192.png", sizes: "192x192", type: "image/png" }],
+            icons: [{ src: "/favicon.ico", sizes: "192x192", type: "image/x-icon" }],
           },
         ],
       },

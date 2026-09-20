@@ -758,6 +758,7 @@ export const adminGetSettings = createServerFn({ method: "GET" }).handler(
         announcementEn: "",
         contactEmail: "",
         contactPhone: "",
+        rankingsPublished: false,
       }
     );
   },
@@ -773,6 +774,7 @@ export const adminSaveSettings = createServerFn({ method: "POST" })
         announcementEn: z.string(),
         contactEmail: z.string(),
         contactPhone: z.string(),
+        rankingsPublished: z.boolean(),
       }),
     }),
   )
@@ -1056,15 +1058,20 @@ export const createUserProfile = createServerFn({ method: "POST" })
 
 export const getRankings = createServerFn({ method: "GET" }).handler(async () => {
   const idToken = getToken();
-  await requireProfile(idToken);
+  const profile = await requireProfile(idToken);
 
-  const [attempts, users] = await Promise.all([
+  const [attempts, users, settingsDoc] = await Promise.all([
     fsList<Attempt>("examAttempts"),
     fsList<Profile>("users"),
+    fsGet<AcademySettings>("settings", "academy"),
   ]);
 
   const submitted = attempts.filter((a) => a.status === "graded" && a.published);
   const students = users.filter((u) => u.role === "student");
+  const rankingsPublished = settingsDoc?.rankingsPublished ?? false;
+
+  const isStaff =
+    profile.role === "owner" || profile.role === "admin" || profile.role === "instructor";
 
   // Calculate scores per student
   const studentScores = students.map((student) => {
@@ -1073,27 +1080,118 @@ export const getRankings = createServerFn({ method: "GET" }).handler(async () =>
     const avgScore =
       studentAttempts.length > 0 ? Math.round(totalScore / studentAttempts.length) : 0;
     const examCount = studentAttempts.length;
+    const nickname = (student as (typeof student & { nickname?: string }))?.nickname;
     return {
       id: student.id,
       fullName: student.fullName,
       email: student.email,
+      nickname: nickname ?? `Student${student.id.slice(-4).toUpperCase()}`,
       avgScore,
       examCount,
       totalScore,
     };
   });
 
-  // Sort by average score, then by exam count
   studentScores.sort((a, b) => {
     if (b.avgScore !== a.avgScore) return b.avgScore - a.avgScore;
     return b.examCount - a.examCount;
   });
 
-  // Add rank
-  return studentScores.map((s, index) => ({
+  const ranked = studentScores.map((s, index) => ({
     ...s,
     rank: index + 1,
   }));
+
+  if (isStaff) {
+    return {
+      all: ranked,
+      rankingsPublished,
+      isStaff: true,
+      myRank: null,
+    };
+  }
+
+  const myRank = ranked.find((r) => r.id === profile.id) ?? null;
+
+  if (rankingsPublished) {
+    return {
+      all: ranked.map((r) => ({
+        rank: r.rank,
+        nickname: r.nickname,
+        avgScore: r.avgScore,
+        examCount: r.examCount,
+        id: r.id === profile.id ? r.id : null,
+      })),
+      rankingsPublished: true,
+      isStaff: false,
+      myRank,
+    };
+  }
+
+  return {
+    all: myRank
+      ? [
+          {
+            rank: myRank.rank,
+            nickname: myRank.nickname,
+            avgScore: myRank.avgScore,
+            examCount: myRank.examCount,
+            id: myRank.id,
+          },
+        ]
+      : [],
+    rankingsPublished: false,
+    isStaff: false,
+    myRank,
+  };
+});
+
+export const adminPublishRankings = createServerFn({ method: "POST" }).handler(async () => {
+  const idToken = getToken();
+  const actor = await requireStaff(idToken);
+
+  const current = (await fsGet<AcademySettings>("settings", "academy")) ?? {
+    telegramHandle: "",
+    telegramUrl: "",
+    announcementOm: "",
+    announcementEn: "",
+    contactEmail: "",
+    contactPhone: "",
+    rankingsPublished: false,
+  };
+
+  const updated: AcademySettings = {
+    ...current,
+    rankingsPublished: true,
+  };
+
+  await fsSet("settings", "academy", updated as unknown as Record<string, unknown>);
+  await logAudit(actor, "rankings.publish");
+  return { success: true, rankingsPublished: true };
+});
+
+export const adminUnpublishRankings = createServerFn({ method: "POST" }).handler(async () => {
+  const idToken = getToken();
+  const actor = await requireStaff(idToken);
+
+  const current = (await fsGet<AcademySettings>("settings", "academy")) ?? {
+    telegramHandle: "",
+    telegramUrl: "",
+    announcementOm: "",
+    announcementEn: "",
+    contactEmail: "",
+    contactPhone: "",
+    rankingsPublished: false,
+  };
+
+  const updated: AcademySettings = {
+    ...current,
+    rankingsPublished: false,
+  };
+
+  await fsSet("settings", "academy", updated as unknown as Record<string, unknown>);
+  await logAudit(actor, "rankings.unpublish");
+  return { success: true, rankingsPublished: false };
 });
 
 // ---------------------------------------------------------------------------

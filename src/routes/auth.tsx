@@ -69,7 +69,7 @@ function GoogleMark() {
 
 function AuthPage() {
   const { t, lang } = useI18n();
-  const { login, register, resetPassword, loginWithGoogle, user, loading } = useAuth();
+  const { login, register, resetPassword, loginWithGoogle, user, profile, isStaff, loading } = useAuth();
   const navigate = useNavigate();
   const [mode, setMode] = useState<Mode>("login");
   const [courses, setCourses] = useState<Course[]>([]);
@@ -90,15 +90,23 @@ function AuthPage() {
   }, []);
 
   useEffect(() => {
-    if (!loading && user) void navigate({ to: "/dashboard" });
-  }, [user, loading, navigate]);
+    if (!loading && user) {
+      const target = isStaff ? "/admin" : "/dashboard";
+      void navigate({ to: target as "/admin" | "/dashboard" });
+    }
+  }, [user, profile, isStaff, loading, navigate]);
+
+  function postAuthRedirect() {
+    const target = isStaff ? "/admin" : "/dashboard";
+    return navigate({ to: target as "/admin" | "/dashboard" });
+  }
 
   async function google() {
     setBusy(true);
     try {
       await loginWithGoogle();
       toast.success(t("common.success"));
-      await navigate({ to: "/dashboard" });
+      await postAuthRedirect();
     } catch (err) {
       toast.error(t(authErrorKey(err)));
     } finally {
@@ -113,7 +121,7 @@ function AuthPage() {
       if (mode === "login") {
         await login(email, password);
         toast.success(t("common.success"));
-        await navigate({ to: "/dashboard" });
+        await postAuthRedirect();
       } else if (mode === "register") {
         if (!department) {
           toast.error(t("auth.departmentRequired"));
@@ -132,7 +140,7 @@ function AuthPage() {
           ...(courseId ? { courseId } : {}),
         });
         toast.success(t("common.success"));
-        await navigate({ to: "/dashboard" });
+        await postAuthRedirect();
       } else {
         await resetPassword(email);
         toast.success(t("auth.resetSent"));

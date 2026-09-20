@@ -104,6 +104,8 @@ export type Exam = {
   hasPassword?: boolean;
   showAnswersAfter?: boolean; // show correct/wrong after result published
   anonymous?: boolean;       // show leaderboard with nicknames only
+  pdfUrl?: string | undefined; // uploaded exam paper PDF URL (data URL or storage URL)
+  pdfName?: string | undefined; // original filename of the uploaded PDF
   createdAt?: number;
   updatedAt?: number;
 };
@@ -223,6 +225,7 @@ export type AcademySettings = {
   announcementEn: string;
   contactEmail: string;
   contactPhone: string;
+  rankingsPublished: boolean;
 };
 
 export const DEFAULT_SETTINGS: AcademySettings = {
@@ -232,4 +235,5 @@ export const DEFAULT_SETTINGS: AcademySettings = {
   announcementEn: "",
   contactEmail: "",
   contactPhone: "",
+  rankingsPublished: false,
 };

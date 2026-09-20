@@ -98,6 +98,8 @@ const BLANK_EXAM: Exam = {
   hasPassword: false,
   showAnswersAfter: false,
   anonymous: true,
+  pdfUrl: undefined,
+  pdfName: undefined,
 };
 
 function statusVariant(s: string): "default" | "secondary" | "outline" | "destructive" {
@@ -219,6 +221,8 @@ function ExamsPage() {
   const [aiExtracting, setAiExtracting] = useState(false);
   const [selectedPdfQs, setSelectedPdfQs] = useState<Set<number>>(new Set());
   const fileRef = useRef<HTMLInputElement>(null);
+  const examPdfRef = useRef<HTMLInputElement>(null);
+  const [examPdfUploading, setExamPdfUploading] = useState(false);
 
   // Leaderboard state
   const [lbExamId, setLbExamId] = useState<string | null>(null);
@@ -464,6 +468,42 @@ function ExamsPage() {
     }
   }
 
+  async function handleExamPdfUpload(file: File) {
+    if (!file) return;
+    if (!file.type.includes("pdf") && !file.name.toLowerCase().endsWith(".pdf")) {
+      toast.error("Please upload a PDF file");
+      return;
+    }
+    setExamPdfUploading(true);
+    try {
+      const reader = new FileReader();
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(file);
+      });
+      setEditing((prev) => ({
+        ...prev,
+        pdfUrl: dataUrl,
+        pdfName: file.name,
+      }));
+      toast.success(`PDF attached: ${file.name}`);
+    } catch {
+      toast.error("Could not read PDF file");
+    } finally {
+      setExamPdfUploading(false);
+    }
+  }
+
+  function removeExamPdf() {
+    setEditing((prev) => ({
+      ...prev,
+      pdfUrl: undefined,
+      pdfName: undefined,
+    }));
+    if (examPdfRef.current) examPdfRef.current.value = "";
+  }
+
   const filteredQ = questions.filter(
     (q) =>
       (!editing.courseId || q.courseId === editing.courseId) &&
@@ -542,6 +582,7 @@ function ExamsPage() {
                       <span>{exam.maxAttempts === 0 ? "Unlimited attempts" : `${exam.maxAttempts} attempt${exam.maxAttempts !== 1 ? "s" : ""}`}</span>
                       <span>Pass: {exam.passMark}%</span>
                       {exam.showAnswersAfter && <span className="text-green-600">Shows answers</span>}
+                      {exam.pdfUrl && <span className="text-primary">📄 PDF attached</span>}
                     </div>
                   </div>
                   <div className="flex gap-1 shrink-0">
@@ -746,6 +787,70 @@ function ExamsPage() {
                 <div className="space-y-1.5">
                   <Label>Instructions (shown on exam start screen)</Label>
                   <Textarea value={editing.instructions ?? ""} onChange={(e) => set("instructions", e.target.value)} rows={3} placeholder="Read each question carefully. No external resources allowed..." />
+                </div>
+                <Separator />
+                <div className="space-y-1.5">
+                  <Label>Exam Paper PDF (optional)</Label>
+                  <p className="text-xs text-muted-foreground mb-2">
+                    Upload a PDF version of the exam paper that students can download/view before or during the exam.
+                  </p>
+                  <input
+                    ref={examPdfRef}
+                    type="file"
+                    accept="application/pdf,.pdf"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) void handleExamPdfUpload(f);
+                    }}
+                  />
+                  {editing.pdfUrl ? (
+                    <div className="flex items-center gap-3 rounded-xl border bg-muted/40 p-3">
+                      <div className="grid size-10 shrink-0 place-items-center rounded-lg bg-primary/10">
+                        <FileText className="size-5 text-primary" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate">{editing.pdfName}</p>
+                        <p className="text-xs text-muted-foreground">PDF attached — students can download</p>
+                      </div>
+                      <div className="flex gap-1 shrink-0">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => window.open(editing.pdfUrl, "_blank")}
+                          className="gap-1 text-xs"
+                        >
+                          <Eye className="size-3.5" /> View
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={removeExamPdf}
+                          className="gap-1 text-xs text-destructive hover:text-destructive"
+                        >
+                          <Trash2 className="size-3.5" /> Remove
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="rounded-xl border-2 border-dashed border-border p-4 text-center">
+                      <FileText className="mx-auto size-8 text-muted-foreground mb-2" />
+                      <p className="text-sm font-medium">No PDF attached</p>
+                      <p className="text-xs text-muted-foreground mt-1 mb-3">
+                        Upload the exam paper as a PDF file
+                      </p>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => examPdfRef.current?.click()}
+                        disabled={examPdfUploading}
+                        className="gap-1.5"
+                      >
+                        <Upload className="size-4" />
+                        {examPdfUploading ? "Uploading..." : "Upload PDF"}
+                      </Button>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -1114,13 +1219,28 @@ function ExamsPage() {
                       ["Result Policy", editing.resultPolicy],
                       ["Password", editing.hasPassword ? "Yes" : "No"],
                       ["Show Answers", editing.showAnswersAfter ? "Yes" : "No"],
+                      ["Exam PDF", editing.pdfName ? `📄 ${editing.pdfName}` : "None"],
                     ].map(([k, v]) => (
                       <div key={k} className="flex justify-between rounded-lg bg-background p-2.5">
                         <span className="text-muted-foreground text-xs">{k}</span>
-                        <span className="font-medium text-xs">{v}</span>
+                        <span className="font-medium text-xs truncate max-w-[60%]">{v}</span>
                       </div>
                     ))}
                   </div>
+                  {editing.pdfUrl && (
+                    <div className="flex items-center gap-2 rounded-lg bg-primary/5 p-2.5">
+                      <FileText className="size-4 text-primary shrink-0" />
+                      <span className="text-xs font-medium flex-1 truncate">{editing.pdfName}</span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 gap-1 text-[11px]"
+                        onClick={() => window.open(editing.pdfUrl, "_blank")}
+                      >
+                        <Eye className="size-3" /> View
+                      </Button>
+                    </div>
+                  )}
                   {editing.instructions && (
                     <div className="rounded-lg bg-background p-3">
                       <p className="text-xs font-semibold text-muted-foreground mb-1">Instructions</p>
