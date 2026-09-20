@@ -75,6 +75,7 @@ function QuestionsPage() {
   const [questions, setQuestions] = useState<Question[]>([]);
   const [courses, setCourses] = useState<Course[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [courseFilter, setCourseFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -85,6 +86,7 @@ function QuestionsPage() {
 
   const refresh = async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const [qs, cs] = await Promise.all([
         call(adminListQuestions, {}),
@@ -93,7 +95,14 @@ function QuestionsPage() {
       setQuestions(qs as Question[]);
       setCourses(cs as Course[]);
     } catch (e) {
-      toast.error(serverErrorMessage(e, t));
+      const msg = serverErrorMessage(e, t);
+      setLoadError(msg);
+      const errStr = String((e as { message?: string })?.message ?? "");
+      // Don't nag the user with a toast for transient session / hydration errors
+      // the user can already see the inline error banner and the "Retry" button.
+      if (!errStr.includes("auth/required") && !errStr.includes("session")) {
+        toast.error(msg);
+      }
     } finally {
       setLoading(false);
     }
@@ -332,6 +341,16 @@ function QuestionsPage() {
           {Array.from({ length: 4 }).map((_, i) => (
             <Skeleton key={i} className="h-20 rounded-lg" />
           ))}
+        </div>
+      ) : loadError ? (
+        <div className="rounded-xl border border-destructive/40 bg-destructive/5 p-6 text-center">
+          <p className="font-semibold text-destructive mb-2">{t("common.error")}</p>
+          <p className="text-sm text-muted-foreground whitespace-pre-wrap break-words mb-4 max-w-2xl mx-auto">
+            {loadError}
+          </p>
+          <Button onClick={() => void refresh()} size="sm">
+            {t("common.retry") ?? "Retry"}
+          </Button>
         </div>
       ) : (
         <div className="divide-y rounded-xl border">

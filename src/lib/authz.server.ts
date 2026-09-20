@@ -20,7 +20,17 @@ export async function requireProfile(idToken: string): Promise<Profile> {
   let verified;
   try {
     verified = await verifyIdToken(idToken);
-  } catch {
+  } catch (err) {
+    const msg = (err as Error | undefined)?.message ?? "";
+    // Preserve descriptive server-misconfiguration messages (e.g. missing API
+    // key, missing service account) so operators can immediately see why
+    // Vercel deploys fail, instead of masking everything as "session expired".
+    const isConfigError =
+      msg.includes("API key is not configured") ||
+      msg.includes("SERVICE_ACCOUNT_JSON") ||
+      msg.includes("id-token-check-failed") ||
+      msg.includes("auth/network-error");
+    if (isConfigError) throw new Error(msg);
     throw new AppError("auth/invalid-session");
   }
 

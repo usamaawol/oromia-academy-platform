@@ -50,7 +50,9 @@ function pemToDer(pem: string): ArrayBuffer {
   const body = pem
     .replace(/-----BEGIN PRIVATE KEY-----/, "")
     .replace(/-----END PRIVATE KEY-----/, "")
-    .replace(/\\n/g, "")
+    .replace(/\\n/g, "\n")
+    .replace(/\n/g, "")
+    .replace(/\r/g, "")
     .replace(/\s/g, "");
   const bin = atob(body);
   const out = new Uint8Array(bin.length);
@@ -280,6 +282,37 @@ export async function fsQuery<T>(collection: string, filters: Filter[], limit = 
 
 /* --------------------------- identity verification --------------------------- */
 
+/**
+ * Resolve the Firebase Web API key used for verifying client ID tokens.
+ *
+ * On Vercel / serverless runtimes, `VITE_*` variables are only baked into
+ * client bundles at build time. Server-side, TanStack Start / Nitro / Vercel
+ * typically expose them through `import.meta.env` (Vite SSR) or plain
+ * `process.env` if the user added them to the Vercel project settings.
+ *
+ * We also accept a bare `FIREBASE_API_KEY` / `GOOGLE_API_KEY` so operators can
+ * avoid the VITE_ prefix entirely on the server.
+ */
+function resolveFirebaseApiKey(): string | undefined {
+  const direct =
+    process.env["GOOGLE_API_KEY"] ??
+    process.env["FIREBASE_API_KEY"] ??
+    process.env["VITE_FIREBASE_API_KEY"];
+  if (direct) return direct;
+
+  if (typeof import.meta !== "undefined") {
+    const env = (
+      import.meta as unknown as Record<string, Record<string, string> | undefined>
+    ).env;
+    if (env) {
+      const vite = env["VITE_FIREBASE_API_KEY"] ?? env["FIREBASE_API_KEY"] ?? env["GOOGLE_API_KEY"];
+      if (vite) return vite;
+    }
+  }
+
+  return undefined;
+}
+
 export type VerifiedUser = { uid: string; email: string; emailVerified: boolean; name: string };
 
 /**
@@ -287,28 +320,37 @@ export type VerifiedUser = { uid: string; email: string; emailVerified: boolean;
  * never fake this: an invalid or expired token is rejected upstream.
  */
 export async function verifyIdToken(idToken: string): Promise<VerifiedUser> {
-  // Try explicit server key first, then fall back to the public Firebase API key.
-  // On Vercel, VITE_* vars must be added to project settings to be available
-  // at runtime — they're NOT automatically available server-side.
-  const key =
-    process.env["GOOGLE_API_KEY"] ??
-    process.env["VITE_FIREBASE_API_KEY"] ??
-    // Vite embeds VITE_* vars into import.meta.env at build time for SSR bundles
-    (typeof import.meta !== "undefined"
-      ? (import.meta as unknown as Record<string, Record<string, string>>).env?.[
-          "VITE_FIREBASE_API_KEY"
-        ]
-      : undefined);
-  if (!key) throw new Error("Firebase API key is not configured on the server");
-  const res = await fetch(
-    `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${encodeURIComponent(key)}`,
-    {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ idToken }),
-    },
-  );
-  if (!res.ok) throw new Error("auth/invalid-session");
+  if (!idToken) throw new Error("auth/required");
+
+  const key = resolveFirebaseApiKey();
+  if (!key) {
+    throw new Error(
+      "Firebase API key is not configured on the server. " +
+        "Set GOOGLE_API_KEY, FIREBASE_API_KEY, or VITE_FIREBASE_API_KEY in Vercel project settings.",
+    );
+  }
+
+  let res: Response;
+  try {
+    res = await fetch(
+      `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${encodeURIComponent(key)}`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ idToken }),
+      },
+    );
+  } catch (cause) {
+    throw new Error("auth/network-error", { cause: cause as Error });
+  }
+
+  if (res.status === 400) {
+    throw new Error("auth/invalid-session");
+  }
+  if (!res.ok) {
+    throw new Error(`auth/id-token-check-failed (${res.status})`);
+  }
+
   const json = (await res.json()) as {
     users?: { localId: string; email?: string; emailVerified?: boolean; displayName?: string }[];
   };
@@ -338,14 +380,7 @@ export type SystemDiagnostics = {
  * Used by the admin "Server status" card so misconfiguration is obvious in-app.
  */
 export async function systemDiagnostics(): Promise<SystemDiagnostics> {
-  const apiKey =
-    process.env["GOOGLE_API_KEY"] ??
-    process.env["VITE_FIREBASE_API_KEY"] ??
-    (typeof import.meta !== "undefined"
-      ? (import.meta as unknown as Record<string, Record<string, string>>).env?.[
-          "VITE_FIREBASE_API_KEY"
-        ]
-      : undefined);
+  const apiKey = resolveFirebaseApiKey();
   const out: SystemDiagnostics = {
     serviceAccountSet: false,
     serviceAccountValid: false,
