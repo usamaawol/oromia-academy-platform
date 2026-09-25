@@ -1,0 +1,1 @@
+import{i as e,t}from"./react-DB-4Zxce.js";import{k as n}from"./index-iMR0Y8OZ.js";var r=e(t());function i(){let e=n();return(0,r.useEffect)(()=>{e({to:`/admin/exams`,replace:!0})},[e]),null}export{i as component};

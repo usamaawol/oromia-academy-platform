@@ -13,14 +13,21 @@ export default defineConfig({
     // nitro/vite builds from this
     server: { entry: "server" },
   },
+  // Deploy to Vercel (Node.js serverless), not Cloudflare Workers.
+  // The default preset is cloudflare-module, which does NOT expose process.env
+  // at runtime — Vercel env vars are only available via process.env in Node.js.
+  // This override ensures server functions (fb-admin.server.ts, etc.) can read
+  // VITE_FIREBASE_API_KEY / GOOGLE_API_KEY / FIREBASE_API_KEY from process.env.
+  nitro: { preset: "vercel" },
   plugins: [
     VitePWA({
       registerType: "autoUpdate",
       injectRegister: false, // we register via virtual:pwa-register in client code
       includeAssets: ["favicon.ico", "apple-touch-icon.png", "icon-192.png", "icon-512.png", "icon-maskable-512.png"],
-      // TanStack Start + nitro tunnel the client build into .output/public, so
-      // emit sw.js/manifest there too and precache the real assets inside it.
-      outDir: ".output/public",
+      // With the vercel nitro preset the static assets land in .vercel/output/static.
+      // Without an explicit outDir, VitePWA writes to the default Vite client outDir
+      // which Vercel's build pipeline picks up automatically.
+      outDir: ".vercel/output/static",
       manifest: {
         name: "Oromia Academy — Barnoota Teeknoolojii fi Qormaata Dijitaalaa",
         short_name: "OromiaAcademy",

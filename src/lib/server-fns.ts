@@ -1293,6 +1293,42 @@ export const getExamLeaderboard = createServerFn({ method: "GET" })
   });
 
 // ---------------------------------------------------------------------------
+// EXAM DOWNLOAD — admin-only exam PDF download with questions and answers
+// ---------------------------------------------------------------------------
+
+export const downloadExamPdf = createServerFn({ method: "GET" })
+  .validator(z.object({ examId: z.string() }))
+  .handler(
+    async ({ data }): Promise<{
+      exam: Exam;
+      questions: Question[];
+      fileName: string;
+    }> => {
+      const idToken = getToken();
+      const admin = await requireAdmin(idToken);
+
+      // Fetch exam
+      const exam = await fsGet<Exam>("exams", data.examId);
+      if (!exam) throw new AppError("exam/not-found");
+
+      // Fetch all questions for this exam
+      const questionDocs = await Promise.all(
+        exam.questionIds.map((qid) => fsGet<Question>("questions", qid)),
+      );
+      const questions = questionDocs.filter((q): q is Question => q !== null);
+
+      // Audit log the download
+      await logAudit(admin, "exam.download", exam.id, exam.title);
+
+      return {
+        exam,
+        questions,
+        fileName: `${exam.title.replace(/\s+/g, "_")}_${Date.now()}.pdf`,
+      };
+    },
+  );
+
+// ---------------------------------------------------------------------------
 // DIAGNOSTICS — server configuration health (staff only)
 // ---------------------------------------------------------------------------
 

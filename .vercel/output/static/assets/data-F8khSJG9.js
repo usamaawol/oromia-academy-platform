@@ -1,0 +1,1 @@
+import{_ as e,b as t,v as n,y as r}from"./index-iMR0Y8OZ.js";var i=!t;async function a(){return i?[...e().courses].sort((e,t)=>(e.order??99)-(t.order??99)):n()}async function o(t){return i?e().notifications.filter(e=>e.userId===`all`||e.userId===t).sort((e,t)=>t.createdAt-e.createdAt):r(t)}export{o as n,a as t};
