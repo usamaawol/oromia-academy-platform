@@ -28,6 +28,9 @@ type AuthCtx = {
   loading: boolean;
   isOwner: boolean;
   isStaff: boolean;
+  /** True when the current profile has activationStatus === "active". Staff bypass this. */
+  isActivated: boolean;
+  activationStatus: UserProfile["activationStatus"];
   localMode: boolean;
   register: (input: {
     fullName: string;
@@ -67,6 +70,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const loadProfile = useCallback(async (u: AuthUser) => {
     let p = await getUserProfile(u.uid);
+    const now = Date.now();
     if (!p) {
       p = {
         id: u.uid,
@@ -75,10 +79,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         email: u.email ?? "",
         role: "student",
         status: "active",
+        activationStatus: "pending",
         enrolledCourseIds: [],
-        createdAt: Date.now(),
+        createdAt: now,
+        updatedAt: now,
       };
       await saveUserProfile(p);
+    } else {
+      // Migration: fill in activationStatus for legacy profiles
+      let changed = false;
+      if (!p.activationStatus) {
+        const isStaff =
+          p.role === "owner" || p.role === "admin" || p.role === "instructor";
+        const hasAnyCourse =
+          (p.enrolledCourseIds?.length ?? 0) > 0 || (p.courseIds?.length ?? 0) > 0;
+        p.activationStatus = isStaff || hasAnyCourse ? "active" : "pending";
+        changed = true;
+      }
+      if (!p.updatedAt) {
+        p.updatedAt = now;
+        changed = true;
+      }
+      if (changed) await saveUserProfile(p);
     }
     setProfile(p);
   }, []);
@@ -122,6 +144,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (existing) throw { code: "auth/email-already-in-use" };
         if (input.password.length < 6) throw { code: "auth/weak-password" };
         const id = uid("u");
+        const now = Date.now();
         const p: UserProfile = {
           id,
           uid: id,
@@ -131,8 +154,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           ...(input.department ? { department: input.department } : {}),
           role: "student",
           status: "active",
-          enrolledCourseIds: input.courseId ? [input.courseId] : [],
-          createdAt: Date.now(),
+          activationStatus: "pending",
+          enrolledCourseIds: [],
+          courseIds: [],
+          createdAt: now,
+          updatedAt: now,
         };
         mutate((db) => {
           db.users = [...db.users, p];
@@ -161,8 +187,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         ...(input.department ? { department: input.department } : {}),
         role: "student",
         status: "active",
-        enrolledCourseIds: input.courseId ? [input.courseId] : [],
-        courseIds: input.courseId ? [input.courseId] : [],
+        activationStatus: "pending",
+        enrolledCourseIds: [],
+        courseIds: [],
         createdAt: now,
         updatedAt: now,
       };
@@ -278,6 +305,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [profile, localMode],
   );
 
+  const activationStatus: AuthCtx["activationStatus"] = profile?.activationStatus ?? undefined;
+  const isStaffComputed =
+    profile?.role === "owner" || profile?.role === "admin" || profile?.role === "instructor";
+  const isActivated =
+    isStaffComputed || profile?.activationStatus === "active";
+
   const value = useMemo<AuthCtx>(
     () => ({
       user,
@@ -285,8 +318,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       loading,
       localMode,
       isOwner: profile?.role === "owner",
-      isStaff:
-        profile?.role === "owner" || profile?.role === "admin" || profile?.role === "instructor",
+      isStaff: isStaffComputed,
+      isActivated,
+      activationStatus,
       register,
       login,
       loginWithGoogle,
@@ -301,6 +335,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       profile,
       loading,
       localMode,
+      isStaffComputed,
+      isActivated,
+      activationStatus,
       register,
       login,
       loginWithGoogle,

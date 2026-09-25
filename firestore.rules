@@ -75,6 +75,7 @@ service cloud.firestore {
         request.resource.data.uid == userId &&
         request.resource.data.role == 'student' &&
         request.resource.data.status == 'active' &&
+        request.resource.data.activationStatus in ['pending'] &&
         (request.resource.data.email.lower() == canonicalEmail());
       // Users can update their own profile (for My Info editing).
       // Role escalation / account suspension is forbidden client-side; only
@@ -86,10 +87,16 @@ service cloud.firestore {
           request.resource.data.email == resource.data.email &&
           request.resource.data.role == resource.data.role &&
           request.resource.data.status == resource.data.status &&
+          request.resource.data.activationStatus == resource.data.activationStatus &&
+          (!('approvedBy' in resource.data) || request.resource.data.get('approvedBy', null) == resource.data.get('approvedBy', null)) &&
+          (!('approvedAt' in resource.data) || request.resource.data.get('approvedAt', null) == resource.data.get('approvedAt', null)) &&
+          (!('rejectedBy' in resource.data) || request.resource.data.get('rejectedBy', null) == resource.data.get('rejectedBy', null)) &&
+          (!('assignedActivationCodeId' in resource.data) || request.resource.data.get('assignedActivationCodeId', null) == resource.data.get('assignedActivationCodeId', null)) &&
           request.resource.data.createdAt == resource.data.createdAt &&
           request.resource.data.diff(resource.data).affectedKeys().hasOnly([
             'id', 'uid', 'email', 'fullName', 'phone', 'department', 'nickname',
-            'enrolledCourseIds', 'courseIds', 'role', 'status', 'createdAt', 'updatedAt'
+            'enrolledCourseIds', 'courseIds', 'role', 'status', 'activationStatus',
+            'createdAt', 'updatedAt'
           ]))
         // Staff (via server, using caller's own token) may promote users,
         // except nobody can change their OWN role (prevents self-escalation).
@@ -165,6 +172,56 @@ service cloud.firestore {
       allow delete: if isOwner();
     }
 
+    // ==================== ACTIVATION CODES COLLECTION ====================
+    // Stores hashed activation codes. Students NEVER read raw codes or hashes.
+    // All code lookups (by hash) and writes (mark used/revoke) go through
+    // trusted server functions that validate the caller's role.
+    match /activationCodes/{codeId} {
+      // Admins can read / list all codes (for the admin panel)
+      allow get, list: if isAdmin();
+      // Code creation only by admin (via server fn)
+      allow create: if isAdmin();
+      // Code update only by admin (mark used, revoke, etc.) — via server fn
+      allow update: if isAdmin();
+      // Hard-delete forbidden — revoke instead (audit trail preserved)
+      allow delete: if false;
+    }
+
+    // ==================== ENROLLMENTS COLLECTION ====================
+    // Course-specific access records. Only created/updated by server fns.
+    // Students cannot create fake paid enrollments.
+    match /enrollments/{enrollmentId} {
+      // Students can read their own enrollments; staff can read all
+      allow get: if (signedIn() && resource.data.userId == request.auth.uid) || isStaff();
+      allow list: if isStaff()
+        || (signedIn() && request.auth.uid != null);
+      // Only server (admin acting as caller) may create/update enrollments.
+      // Students are explicitly blocked from creating enrollment docs.
+      allow create: if isAdmin();
+      allow update: if isAdmin();
+      allow delete: if isOwner();
+    }
+
+    // ==================== ACTIVATION HISTORY COLLECTION ====================
+    // Immutable audit trail for activation events.
+    match /activationHistory/{entryId} {
+      allow get, list: if isAdmin();
+      allow create: if isAdmin();
+      allow update, delete: if false;
+    }
+
+    // ==================== ACTIVATION CODE SECRETS COLLECTION ====================
+    // Stores the raw (unhashed) activation code for each student.
+    // Only readable server-side (admin token) — students NEVER read this directly.
+    // The server fn getMyPendingCode reads it and returns only the student's own code
+    // after verifying activationStatus === "approved" and userId matches.
+    match /activationCodeSecrets/{codeId} {
+      // Only admin/owner can read/write these secrets via the server.
+      allow get, list, create, update: if isAdmin();
+      // Hard-delete forbidden — codes stay for audit.
+      allow delete: if false;
+    }
+
     // ==================== NOTIFICATIONS COLLECTION ====================
     // System notifications for users
     match /notifications/{notificationId} {
@@ -199,3 +256,4 @@ service cloud.firestore {
     }
   }
 }
+yu./l;,

@@ -13,12 +13,15 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as AdminRouteImport } from './routes/_admin'
 import { Route as AuthedRouteImport } from './routes/_authed'
 import { Route as AboutRouteImport } from './routes/about'
+import { Route as ActivateRouteImport } from './routes/activate'
 import { Route as AuthRouteImport } from './routes/auth'
+import { Route as WaitingForApprovalRouteImport } from './routes/waiting-for-approval'
 import { Route as AdminAdminRouteImport } from './routes/_admin.admin'
 import { Route as AuthedDashboardRouteImport } from './routes/_authed.dashboard'
 import { Route as ExamExamIdRouteImport } from './routes/exam.$examId'
 import { Route as ResultAttemptIdRouteImport } from './routes/result.$attemptId'
 import { Route as AdminAdminIndexRouteImport } from './routes/_admin.admin.index'
+import { Route as AdminAdminActivationCodesRouteImport } from './routes/_admin.admin.activation-codes'
 import { Route as AdminAdminAiImportRouteImport } from './routes/_admin.admin.ai-import'
 import { Route as AdminAdminAnalyticsRouteImport } from './routes/_admin.admin.analytics'
 import { Route as AdminAdminAuditRouteImport } from './routes/_admin.admin.audit'
@@ -48,9 +51,19 @@ const AboutRoute = AboutRouteImport.update({
   path: '/about',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ActivateRoute = ActivateRouteImport.update({
+  id: '/activate',
+  path: '/activate',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AuthRoute = AuthRouteImport.update({
   id: '/auth',
   path: '/auth',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const WaitingForApprovalRoute = WaitingForApprovalRouteImport.update({
+  id: '/waiting-for-approval',
+  path: '/waiting-for-approval',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AdminAdminRoute = AdminAdminRouteImport.update({
@@ -78,6 +91,12 @@ const AdminAdminIndexRoute = AdminAdminIndexRouteImport.update({
   path: '/',
   getParentRoute: () => AdminAdminRoute,
 } as any)
+const AdminAdminActivationCodesRoute =
+  AdminAdminActivationCodesRouteImport.update({
+    id: '/activation-codes',
+    path: '/activation-codes',
+    getParentRoute: () => AdminAdminRoute,
+  } as any)
 const AdminAdminAiImportRoute = AdminAdminAiImportRouteImport.update({
   id: '/ai-import',
   path: '/ai-import',
@@ -132,11 +151,14 @@ const AdminAdminStudentsRoute = AdminAdminStudentsRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
+  '/activate': typeof ActivateRoute
   '/auth': typeof AuthRoute
+  '/waiting-for-approval': typeof WaitingForApprovalRoute
   '/admin': typeof AdminAdminRouteWithChildren
   '/dashboard': typeof AuthedDashboardRoute
   '/exam/$examId': typeof ExamExamIdRoute
   '/result/$attemptId': typeof ResultAttemptIdRoute
+  '/admin/activation-codes': typeof AdminAdminActivationCodesRoute
   '/admin/ai-import': typeof AdminAdminAiImportRoute
   '/admin/analytics': typeof AdminAdminAnalyticsRoute
   '/admin/audit': typeof AdminAdminAuditRoute
@@ -152,10 +174,13 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
+  '/activate': typeof ActivateRoute
   '/auth': typeof AuthRoute
+  '/waiting-for-approval': typeof WaitingForApprovalRoute
   '/dashboard': typeof AuthedDashboardRoute
   '/exam/$examId': typeof ExamExamIdRoute
   '/result/$attemptId': typeof ResultAttemptIdRoute
+  '/admin/activation-codes': typeof AdminAdminActivationCodesRoute
   '/admin/ai-import': typeof AdminAdminAiImportRoute
   '/admin/analytics': typeof AdminAdminAnalyticsRoute
   '/admin/audit': typeof AdminAdminAuditRoute
@@ -174,11 +199,14 @@ export interface FileRoutesById {
   '/_admin': typeof AdminRouteWithChildren
   '/_authed': typeof AuthedRouteWithChildren
   '/about': typeof AboutRoute
+  '/activate': typeof ActivateRoute
   '/auth': typeof AuthRoute
+  '/waiting-for-approval': typeof WaitingForApprovalRoute
   '/_admin/admin': typeof AdminAdminRouteWithChildren
   '/_authed/dashboard': typeof AuthedDashboardRoute
   '/exam/$examId': typeof ExamExamIdRoute
   '/result/$attemptId': typeof ResultAttemptIdRoute
+  '/_admin/admin/activation-codes': typeof AdminAdminActivationCodesRoute
   '/_admin/admin/ai-import': typeof AdminAdminAiImportRoute
   '/_admin/admin/analytics': typeof AdminAdminAnalyticsRoute
   '/_admin/admin/audit': typeof AdminAdminAuditRoute
@@ -196,11 +224,14 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/about'
+    | '/activate'
     | '/auth'
+    | '/waiting-for-approval'
     | '/admin'
     | '/dashboard'
     | '/exam/$examId'
     | '/result/$attemptId'
+    | '/admin/activation-codes'
     | '/admin/ai-import'
     | '/admin/analytics'
     | '/admin/audit'
@@ -216,10 +247,13 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/about'
+    | '/activate'
     | '/auth'
+    | '/waiting-for-approval'
     | '/dashboard'
     | '/exam/$examId'
     | '/result/$attemptId'
+    | '/admin/activation-codes'
     | '/admin/ai-import'
     | '/admin/analytics'
     | '/admin/audit'
@@ -237,11 +271,14 @@ export interface FileRouteTypes {
     | '/_admin'
     | '/_authed'
     | '/about'
+    | '/activate'
     | '/auth'
+    | '/waiting-for-approval'
     | '/_admin/admin'
     | '/_authed/dashboard'
     | '/exam/$examId'
     | '/result/$attemptId'
+    | '/_admin/admin/activation-codes'
     | '/_admin/admin/ai-import'
     | '/_admin/admin/analytics'
     | '/_admin/admin/audit'
@@ -260,7 +297,9 @@ export interface RootRouteChildren {
   AdminRoute: typeof AdminRouteWithChildren
   AuthedRoute: typeof AuthedRouteWithChildren
   AboutRoute: typeof AboutRoute
+  ActivateRoute: typeof ActivateRoute
   AuthRoute: typeof AuthRoute
+  WaitingForApprovalRoute: typeof WaitingForApprovalRoute
   ExamExamIdRoute: typeof ExamExamIdRoute
   ResultAttemptIdRoute: typeof ResultAttemptIdRoute
 }
@@ -295,11 +334,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AboutRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/activate': {
+      id: '/activate'
+      path: '/activate'
+      fullPath: '/activate'
+      preLoaderRoute: typeof ActivateRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/auth': {
       id: '/auth'
       path: '/auth'
       fullPath: '/auth'
       preLoaderRoute: typeof AuthRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/waiting-for-approval': {
+      id: '/waiting-for-approval'
+      path: '/waiting-for-approval'
+      fullPath: '/waiting-for-approval'
+      preLoaderRoute: typeof WaitingForApprovalRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_admin/admin': {
@@ -335,6 +388,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/admin/'
       preLoaderRoute: typeof AdminAdminIndexRouteImport
+      parentRoute: typeof AdminAdminRoute
+    }
+    '/_admin/admin/activation-codes': {
+      id: '/_admin/admin/activation-codes'
+      path: '/activation-codes'
+      fullPath: '/admin/activation-codes'
+      preLoaderRoute: typeof AdminAdminActivationCodesRouteImport
       parentRoute: typeof AdminAdminRoute
     }
     '/_admin/admin/ai-import': {
@@ -411,6 +471,7 @@ declare module '@tanstack/react-router' {
 }
 
 interface AdminAdminRouteChildren {
+  AdminAdminActivationCodesRoute: typeof AdminAdminActivationCodesRoute
   AdminAdminAiImportRoute: typeof AdminAdminAiImportRoute
   AdminAdminAnalyticsRoute: typeof AdminAdminAnalyticsRoute
   AdminAdminAuditRoute: typeof AdminAdminAuditRoute
@@ -425,6 +486,7 @@ interface AdminAdminRouteChildren {
 }
 
 const AdminAdminRouteChildren: AdminAdminRouteChildren = {
+  AdminAdminActivationCodesRoute: AdminAdminActivationCodesRoute,
   AdminAdminAiImportRoute: AdminAdminAiImportRoute,
   AdminAdminAnalyticsRoute: AdminAdminAnalyticsRoute,
   AdminAdminAuditRoute: AdminAdminAuditRoute,
@@ -468,7 +530,9 @@ const rootRouteChildren: RootRouteChildren = {
   AdminRoute: AdminRouteWithChildren,
   AuthedRoute: AuthedRouteWithChildren,
   AboutRoute: AboutRoute,
+  ActivateRoute: ActivateRoute,
   AuthRoute: AuthRoute,
+  WaitingForApprovalRoute: WaitingForApprovalRoute,
   ExamExamIdRoute: ExamExamIdRoute,
   ResultAttemptIdRoute: ResultAttemptIdRoute,
 }

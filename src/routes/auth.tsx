@@ -91,14 +91,15 @@ function AuthPage() {
 
   useEffect(() => {
     if (!loading && user) {
-      const target = isStaff ? "/admin" : "/dashboard";
-      void navigate({ to: target as "/admin" | "/dashboard" });
+      const target = isStaff ? "/admin" : (profile?.activationStatus === "active" ? "/dashboard" : "/waiting-for-approval");
+      void navigate({ to: target as "/admin" | "/dashboard" | "/waiting-for-approval" });
     }
   }, [user, profile, isStaff, loading, navigate]);
 
   function postAuthRedirect() {
-    const target = isStaff ? "/admin" : "/dashboard";
-    return navigate({ to: target as "/admin" | "/dashboard" });
+    if (isStaff) return navigate({ to: "/admin" });
+    if (profile?.activationStatus === "active") return navigate({ to: "/dashboard" });
+    return navigate({ to: "/waiting-for-approval" });
   }
 
   async function google() {

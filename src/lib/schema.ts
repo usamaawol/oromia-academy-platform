@@ -10,6 +10,16 @@ export type Role = "owner" | "admin" | "instructor" | "student";
 export const STAFF_ROLES: Role[] = ["owner", "admin", "instructor"];
 export const ADMIN_ROLES: Role[] = ["owner", "admin"];
 
+/**
+ * pending   — just registered, waiting for admin approval
+ * approved  — admin approved, unique activation code is visible to student
+ * active    — student entered their code and activated the account
+ * rejected  — admin rejected the registration
+ * suspended — admin suspended an active account
+ * expired   — enrollment/code expired
+ */
+export type ActivationStatus = "pending" | "approved" | "active" | "rejected" | "suspended" | "expired";
+
 export type Profile = {
   id: string;
   uid: string;
@@ -20,7 +30,81 @@ export type Profile = {
   nickname?: string; // anonymous display name for leaderboards
   role: Role;
   courseIds: string[];
+  /** Account-level status (for staff / suspension). */
   status: "active" | "suspended";
+  /** Activation: pending until admin approves, then approved until code redeemed. */
+  activationStatus: ActivationStatus;
+  activatedAt?: number;
+  activationCodeId?: string;
+  /** ID of the auto-generated unique activation code for this student. */
+  assignedActivationCodeId?: string;
+  /** Admin who approved/rejected this profile. */
+  approvedBy?: string;
+  approvedAt?: number;
+  rejectedBy?: string;
+  rejectedAt?: number;
+  rejectionReason?: string;
+  createdAt: number;
+  updatedAt: number;
+};
+
+// ===========================================================================
+// Activation codes
+// ===========================================================================
+
+export type ActivationCodeStatus = "available" | "used" | "expired" | "revoked";
+
+export type ActivationCode = {
+  id: string;
+  /** SHA-256 hash of the uppercase raw code. Never stored raw. */
+  codeHash: string;
+  /** Last 4 characters of the raw code (for admin search/UI display only). */
+  codeLast4: string;
+  status: ActivationCodeStatus;
+  /** If set, only this Firebase UID may redeem the code. */
+  assignedUserId: string | null;
+  /** If set, redemption creates/activates an enrollment for this course. */
+  courseId: string | null;
+  /** UID of admin who generated this code. */
+  createdBy: string | null;
+  createdAt: number;
+  /** Unix ms after which the code can no longer be redeemed. null = never expires. */
+  expiresAt: number | null;
+  usedAt: number | null;
+  usedByUserId: string | null;
+  revokedAt: number | null;
+  revokedByUserId: string | null;
+  /** Optional note for admin reference (e.g. "Batch 3 — Telegram"). */
+  note?: string;
+};
+
+/** View returned to the admin (includes the raw code only when freshly generated). */
+export type ActivationCodeAdminView = ActivationCode & {
+  rawCode?: string;
+  usedByUserName?: string;
+  assignedUserName?: string;
+  courseTitleEn?: string;
+  courseTitleOm?: string;
+};
+
+// ===========================================================================
+// Enrollments — course-specific access
+// ===========================================================================
+
+export type EnrollmentStatus = "pending" | "active" | "suspended" | "expired" | "cancelled";
+export type PaymentStatus = "pending" | "paid" | "failed" | "refunded";
+
+export type Enrollment = {
+  id: string;
+  userId: string;
+  courseId: string;
+  status: EnrollmentStatus;
+  paymentStatus: PaymentStatus;
+  /** Which activation code id unlocked this enrollment (null for admin manual grants). */
+  activatedByCodeId: string | null;
+  enrolledAt: number | null;
+  /** Unix ms at which this enrollment lapses. null = never expires. */
+  expiresAt: number | null;
   createdAt: number;
   updatedAt: number;
 };

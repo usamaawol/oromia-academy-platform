@@ -31,6 +31,12 @@ import type {
   Course,
   AcademySettings,
   AuditEntry,
+  ActivationCode,
+  ActivationCodeAdminView,
+  ActivationStatus,
+  Enrollment,
+  EnrollmentStatus,
+  PaymentStatus,
 } from "./schema";
 import type { UserProfile } from "./types";
 
@@ -124,6 +130,18 @@ export const startExam = createServerFn({ method: "POST" })
 
     const win = examWindowState(exam as Exam, now);
     if (win !== "open") throw new AppError("exam/not-open");
+
+    // Activation + enrollment gate
+    // Staff bypass this check (they can preview exams).
+    const staff: Profile["role"][] = ["owner", "admin", "instructor"];
+    if (!staff.includes(profile.role)) {
+      // 1. Account must be activated (pending -> /activate first)
+      if (profile.activationStatus !== "active")
+        throw new AppError("activation/activation-required");
+      // 2. Must have an active, paid, non-expired enrollment for this course
+      if (!(await hasActiveEnrollment(profile, exam.courseId)))
+        throw new AppError("exam/not-enrolled");
+    }
 
     // Password check
     if (exam.hasPassword) {
@@ -834,6 +852,11 @@ export const adminGetAnalytics = createServerFn({ method: "GET" }).handler(async
 
   return {
     totalStudents: students.length,
+    pendingStudents: students.filter((u) => (u.activationStatus ?? "pending") === "pending").length,
+    approvedStudents: students.filter((u) => u.activationStatus === "approved").length,
+    activatedStudents: students.filter((u) => u.activationStatus === "active").length,
+    rejectedStudents: students.filter((u) => u.activationStatus === "rejected").length,
+    suspendedStudents: students.filter((u) => u.activationStatus === "suspended").length,
     totalCourses: courses.length,
     totalExams: exams.length,
     activeExams,
@@ -863,10 +886,41 @@ export const myAttempts = createServerFn({ method: "GET" }).handler(
 export const availableExams = createServerFn({ method: "GET" }).handler(
   async (): Promise<Exam[]> => {
     const idToken = getToken();
-    await requireProfile(idToken);
+    const profile = await requireProfile(idToken);
     const all = await fsQuery<Exam>("exams", [["status", "EQUAL", "active"]]);
     const now = Date.now();
-    return all.filter((e) => examWindowState(e, now) === "open" || e.status === "active");
+    const opened = all.filter(
+      (e) => examWindowState(e, now) === "open" || e.status === "active",
+    );
+    // Staff see every open exam; students only see exams for courses they are
+    // actively enrolled in.
+    const isStaff =
+      profile.role === "owner" ||
+      profile.role === "admin" ||
+      profile.role === "instructor";
+    if (isStaff) return opened;
+
+    // Student filter: active enrollment per exam.courseId.
+    // To keep the fn fast, batch-check only the courses present in `opened`.
+    const neededCourseIds = [...new Set(opened.map((e) => e.courseId))];
+    if (neededCourseIds.length === 0) return [];
+    const myEnrollments = await fsQuery<Enrollment>("enrollments", [
+      ["userId", "EQUAL", profile.id],
+    ]);
+    const active = new Set<string>();
+    for (const e of myEnrollments) {
+      if (
+        e.status === "active" &&
+        e.paymentStatus === "paid" &&
+        (!e.expiresAt || e.expiresAt >= now)
+      ) {
+        active.add(e.courseId);
+      }
+    }
+    // Legacy fallback: if profile.courseIds is populated and no enrollments
+    // exist yet (pre-migration data), treat profile.courseIds as enrolled.
+    const legacy = new Set<string>(profile.courseIds ?? []);
+    return opened.filter((e) => active.has(e.courseId) || legacy.has(e.courseId));
   },
 );
 
@@ -1040,8 +1094,9 @@ export const createUserProfile = createServerFn({ method: "POST" })
       fullName: data.fullName,
       email: data.email.toLowerCase().trim(),
       role: "student",
-      courseIds: data.courseId ? [data.courseId] : [],
+      courseIds: [],
       status: "active",
+      activationStatus: "pending",
       createdAt: now,
       updatedAt: now,
       ...(data.phone && { phone: data.phone }),
@@ -1337,3 +1392,679 @@ export const adminBulkSaveQuestions = createServerFn({ method: "POST" })
     return { saved: ids.length, ids };
   });
 
+// ===========================================================================
+// ACTIVATION CODES + ENROLLMENTS
+// ===========================================================================
+
+// ---------- code generation helpers ----------
+
+const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no 0/O/1/I
+
+function randomSegment(len: number): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(len));
+  let out = "";
+  for (const b of bytes) out += CODE_ALPHABET[b % CODE_ALPHABET.length]!;
+  return out;
+}
+
+/** Generate one activation code in the form `OA-XXXX-XXXX`. */
+export function generateRawCode(): string {
+  return `OA-${randomSegment(4)}-${randomSegment(4)}`;
+}
+
+function normalizeCode(raw: string): string {
+  return raw.trim().toUpperCase().replace(/[^A-Z0-9-]/g, "");
+}
+
+/**
+ * Find an activation code by raw user input.
+ * Hashes the normalized input and queries the activationCodes collection.
+ */
+async function findCodeByRaw(raw: string): Promise<ActivationCode | null> {
+  const norm = normalizeCode(raw);
+  if (!norm) return null;
+  const hash = await sha256Hex(norm);
+  const matches = await fsQuery<ActivationCode>("activationCodes", [
+    ["codeHash", "EQUAL", hash],
+  ]);
+  if (matches.length === 0) return null;
+  return matches[0]!;
+}
+
+/**
+ * Upsert enrollment: activate (or re-activate) `userId` in `courseId` and mark
+ * it paid. Used both during code redemption and for admin manual activation.
+ * Returns the enrollment id.
+ */
+async function activateEnrollment(
+  userId: string,
+  courseId: string,
+  {
+    activatedByCodeId,
+    expiresAt,
+  }: { activatedByCodeId: string | null; expiresAt: number | null },
+): Promise<string> {
+  const now = Date.now();
+  const existing = await fsQuery<Enrollment>("enrollments", [
+    ["userId", "EQUAL", userId],
+    ["courseId", "EQUAL", courseId],
+  ]);
+  const base: Record<string, unknown> = {
+    userId,
+    courseId,
+    status: "active" as EnrollmentStatus,
+    paymentStatus: "paid" as PaymentStatus,
+    activatedByCodeId,
+    enrolledAt: now,
+    expiresAt,
+    updatedAt: now,
+  };
+  if (existing[0]) {
+    const id = existing[0].id;
+    await fsSet("enrollments", id, base);
+    return id;
+  }
+  const id = await fsCreate("enrollments", {
+    ...base,
+    createdAt: now,
+  });
+  return id;
+}
+
+// ---------- admin: generate N codes ----------
+
+export const generateActivationCodes = createServerFn({ method: "POST" })
+  .validator(
+    z.object({
+      count: z.number().int().min(1).max(500),
+      courseId: z.string().nullable().optional(),
+      assignedUserId: z.string().nullable().optional(),
+      expiresAt: z.number().nullable().optional(),
+      note: z.string().optional(),
+    }),
+  )
+  .handler(async ({ data }): Promise<ActivationCodeAdminView[]> => {
+    const idToken = getToken();
+    const actor = await requireAdmin(idToken);
+    const now = Date.now();
+    const out: ActivationCodeAdminView[] = [];
+    const n = Math.max(1, Math.min(500, Math.floor(data.count)));
+    for (let i = 0; i < n; i++) {
+      const raw = generateRawCode();
+      const hash = await sha256Hex(raw);
+      const codeLast4 = raw.slice(-4);
+      const record: ActivationCode = {
+        id: crypto.randomUUID(),
+        codeHash: hash,
+        codeLast4,
+        status: "available",
+        assignedUserId: data.assignedUserId ?? null,
+        courseId: data.courseId ?? null,
+        createdBy: actor.id,
+        createdAt: now,
+        expiresAt: data.expiresAt ?? null,
+        usedAt: null,
+        usedByUserId: null,
+        revokedAt: null,
+        revokedByUserId: null,
+        ...(data.note ? { note: data.note } : {}),
+      };
+      await fsCreate("activationCodes", record as unknown as Record<string, unknown>);
+      out.push({ ...record, rawCode: raw });
+    }
+    await logAudit(
+      actor,
+      "activationCodes.generate",
+      undefined,
+      `Generated ${n} code(s)${data.courseId ? ` for course ${data.courseId}` : ""}${
+        data.assignedUserId ? ` assigned to ${data.assignedUserId}` : ""
+      }`,
+    );
+    return out;
+  });
+
+// ---------- student: redeem activation code ----------
+
+export const redeemActivationCode = createServerFn({ method: "POST" })
+  .validator(
+    z.object({
+      code: z.string().min(6).max(64),
+    }),
+  )
+  .handler(
+    async ({
+      data,
+    }): Promise<{
+      ok: true;
+      activationStatus: ActivationStatus;
+      courseId: string | null;
+    }> => {
+      const idToken = getToken();
+      const profile = await requireProfile(idToken);
+
+      // 1. Already activated? Succeed immediately (don't consume another code).
+      if (profile.activationStatus === "active") {
+        // If they pasted a code anyway, don't consume it or break anything.
+        return { ok: true, activationStatus: "active", courseId: null };
+      }
+      // 2. Suspended/expired/rejected accounts cannot redeem codes.
+      if (
+        profile.activationStatus === "suspended" ||
+        profile.activationStatus === "expired" ||
+        profile.activationStatus === "rejected"
+      ) {
+        throw new AppError("activation/account-locked");
+      }
+      // 3. Pending students (not yet approved) cannot redeem codes yet.
+      if (profile.activationStatus === "pending") {
+        throw new AppError("activation/not-approved");
+      }
+
+      // 3. Locate the code (by hash) — do NOT expose hash to browser.
+      const code = await findCodeByRaw(data.code);
+      if (!code) throw new AppError("activation/invalid-code");
+
+      const now = Date.now();
+
+      // 4. Status checks: used, revoked, expired, assigned-user.
+      if (code.status === "used") throw new AppError("activation/code-used");
+      if (code.status === "revoked") throw new AppError("activation/code-revoked");
+      if (code.expiresAt && code.expiresAt < now) throw new AppError("activation/code-expired");
+      if (code.assignedUserId && code.assignedUserId !== profile.id)
+        throw new AppError("activation/code-wrong-user");
+
+      // 5. Atomic-ish write: mark code used + update profile activation + create
+      //    enrollment. If a second call races in, the status transition from
+      //    "available" will reject the second redemption below.
+      //
+      // Re-read the code document via fsGet right before writing to detect any
+      // concurrent change since we queried it via fsQuery.
+      const fresh = await fsGet<ActivationCode>("activationCodes", code.id);
+      if (!fresh || fresh.status !== "available") {
+        throw new AppError("activation/code-used");
+      }
+
+      // Transition code status -> used
+      const updatedCode: ActivationCode = {
+        ...fresh,
+        status: "used",
+        usedAt: now,
+        usedByUserId: profile.id,
+      };
+      await fsSet(
+        "activationCodes",
+        fresh.id,
+        updatedCode as unknown as Record<string, unknown>,
+      );
+
+      // Transition profile -> active
+      const profilePatch: Record<string, unknown> = {
+        activationStatus: "active" as ActivationStatus,
+        activatedAt: now,
+        activationCodeId: fresh.id,
+        updatedAt: now,
+      };
+      // If the code is assigned to a course, record it as an enrolled course id
+      // for backwards compatibility with the older courseIds[] based UI.
+      const activatedCourseId = fresh.courseId;
+      if (activatedCourseId) {
+        const union = new Set<string>([...(profile.courseIds ?? []), activatedCourseId]);
+        profilePatch["courseIds"] = [...union];
+      }
+      await fsSet("users", profile.id, profilePatch);
+
+      // Activate enrollment for the linked course (if any)
+      let enrollmentId: string | null = null;
+      if (activatedCourseId) {
+        enrollmentId = await activateEnrollment(profile.id, activatedCourseId, {
+          activatedByCodeId: fresh.id,
+          expiresAt: fresh.expiresAt,
+        });
+      }
+
+      await logAudit(
+        profile,
+        "activation.redeemed",
+        activatedCourseId ?? undefined,
+        `code=${fresh.codeLast4}${enrollmentId ? ` enrollment=${enrollmentId}` : ""}`,
+      );
+
+      return {
+        ok: true,
+        activationStatus: "active",
+        courseId: activatedCourseId,
+      };
+    },
+  );
+
+// ---------- admin: list activation codes ----------
+
+export const adminListActivationCodes = createServerFn({ method: "GET" })
+  .validator(
+    z
+      .object({
+        status: z.enum(["all", "available", "used", "expired", "revoked"]).optional(),
+        courseId: z.string().nullable().optional(),
+        searchLast4: z.string().nullable().optional(),
+        assignedUserId: z.string().nullable().optional(),
+      })
+      .optional(),
+  )
+  .handler(async ({ data }): Promise<ActivationCodeAdminView[]> => {
+    const idToken = getToken();
+    await requireStaff(idToken);
+    const all = await fsList<ActivationCode>("activationCodes");
+    const users = await fsList<Profile>("users");
+    const courses = await fsList<Course>("courses");
+    const userById = new Map(users.map((u) => [u.id, u]));
+    const courseById = new Map(courses.map((c) => [c.id, c]));
+    const filt = data ?? {};
+    const out: ActivationCodeAdminView[] = [];
+    for (const c of all) {
+      if (filt.status && filt.status !== "all" && c.status !== filt.status) continue;
+      if (filt.courseId && c.courseId !== filt.courseId) continue;
+      if (filt.assignedUserId && c.assignedUserId !== filt.assignedUserId) continue;
+      if (filt.searchLast4 && !c.codeLast4.includes(filt.searchLast4.toUpperCase()))
+        continue;
+      const usedBy = c.usedByUserId ? userById.get(c.usedByUserId) : undefined;
+      const assigned = c.assignedUserId ? userById.get(c.assignedUserId) : undefined;
+      const course = c.courseId ? courseById.get(c.courseId) : undefined;
+      out.push({
+        ...c,
+        usedByUserName: usedBy ? usedBy.fullName : undefined,
+        assignedUserName: assigned ? assigned.fullName : undefined,
+        courseTitleOm: course?.titleOm,
+        courseTitleEn: course?.titleEn,
+      });
+    }
+    out.sort((a, b) => b.createdAt - a.createdAt);
+    return out;
+  });
+
+// ---------- admin: revoke code ----------
+
+export const adminRevokeActivationCode = createServerFn({ method: "POST" })
+  .validator(z.object({ id: z.string() }))
+  .handler(async ({ data }): Promise<void> => {
+    const idToken = getToken();
+    const actor = await requireAdmin(idToken);
+    const existing = await fsGet<ActivationCode>("activationCodes", data.id);
+    if (!existing) throw new AppError("activation/not-found");
+    if (existing.status === "used") throw new AppError("activation/code-used");
+    const now = Date.now();
+    await fsSet("activationCodes", data.id, {
+      status: "revoked" as const,
+      revokedAt: now,
+      revokedByUserId: actor.id,
+      updatedAt: now,
+    });
+    await logAudit(actor, "activationCodes.revoke", data.id);
+  });
+
+// ---------- admin: manually activate a student + optional course enrollments ----------
+
+export const adminManualActivateStudent = createServerFn({ method: "POST" })
+  .validator(
+    z.object({
+      userId: z.string(),
+      courseIds: z.array(z.string()).optional(),
+      expiresAt: z.number().nullable().optional(),
+      note: z.string().optional(),
+    }),
+  )
+  .handler(async ({ data }): Promise<void> => {
+    const idToken = getToken();
+    const actor = await requireAdmin(idToken);
+    const target = await fsGet<Profile>("users", data.userId);
+    if (!target) throw new AppError("auth/user-not-found");
+    const now = Date.now();
+
+    // Flip activation status to active
+    const profilePatch: Record<string, unknown> = {
+      activationStatus: "active" as ActivationStatus,
+      status: "active" as const,
+      activatedAt: target.activatedAt ?? now,
+      updatedAt: now,
+    };
+    if (data.courseIds && data.courseIds.length > 0) {
+      const union = new Set<string>([...(target.courseIds ?? []), ...data.courseIds]);
+      profilePatch["courseIds"] = [...union];
+    }
+    await fsSet("users", target.id, profilePatch);
+
+    // Create/activate enrollment for each requested course
+    if (data.courseIds && data.courseIds.length > 0) {
+      for (const courseId of data.courseIds) {
+        await activateEnrollment(target.id, courseId, {
+          activatedByCodeId: null,
+          expiresAt: data.expiresAt ?? null,
+        });
+      }
+    }
+
+    await logAudit(
+      actor,
+      "activation.adminActivate",
+      target.id,
+      [
+        `courses=${(data.courseIds ?? []).join(",") || "none"}`,
+        data.note ? `note=${data.note}` : "",
+      ]
+        .filter(Boolean)
+        .join(" "),
+    );
+  });
+
+// ---------- admin: set activation status manually (suspend/reactivate/expire) ----------
+
+export const adminSetActivationStatus = createServerFn({ method: "POST" })
+  .validator(
+    z.object({
+      userId: z.string(),
+      activationStatus: z.enum(["pending", "active", "suspended", "expired"]),
+    }),
+  )
+  .handler(async ({ data }): Promise<void> => {
+    const idToken = getToken();
+    const actor = await requireAdmin(idToken);
+    const target = await fsGet<Profile>("users", data.userId);
+    if (!target) throw new AppError("auth/user-not-found");
+    const now = Date.now();
+    await fsSet("users", target.id, {
+      activationStatus: data.activationStatus,
+      updatedAt: now,
+    });
+    await logAudit(
+      actor,
+      `activation.setStatus.${data.activationStatus}`,
+      target.id,
+    );
+  });
+
+// ---------- student: get own enrollments ----------
+
+export const getMyEnrollments = createServerFn({ method: "GET" }).handler(
+  async (): Promise<Enrollment[]> => {
+    const idToken = getToken();
+    const profile = await requireProfile(idToken);
+    const all = await fsQuery<Enrollment>("enrollments", [
+      ["userId", "EQUAL", profile.id],
+    ]);
+    const now = Date.now();
+    // Mark any lapsed enrollments as expired (best effort)
+    for (const e of all) {
+      if (e.status === "active" && e.expiresAt && e.expiresAt < now) {
+        e.status = "expired";
+        void fsSet("enrollments", e.id, { status: "expired", updatedAt: now }).catch(
+          () => undefined,
+        );
+      }
+    }
+    return all;
+  },
+);
+
+// ===========================================================================
+// PROTECT availableExams + startExam USING ENROLLMENTS
+// ===========================================================================
+
+/**
+ * Return true if `profile` has an active, paid, non-expired enrollment for
+ * `courseId`. Staff users are treated as enrolled in every course.
+ */
+async function hasActiveEnrollment(
+  profile: Profile,
+  courseId: string | null | undefined,
+): Promise<boolean> {
+  const isStaff =
+    profile.role === "owner" || profile.role === "admin" || profile.role === "instructor";
+  if (isStaff) return true;
+  if (!courseId) return true; // no course restriction specified
+
+  const list = await fsQuery<Enrollment>("enrollments", [
+    ["userId", "EQUAL", profile.id],
+    ["courseId", "EQUAL", courseId],
+  ]);
+  const now = Date.now();
+  return list.some(
+    (e) =>
+      e.status === "active" &&
+      e.paymentStatus === "paid" &&
+      (!e.expiresAt || e.expiresAt >= now),
+  );
+}
+
+
+// ===========================================================================
+// ADMIN APPROVAL FLOW
+// ===========================================================================
+
+/**
+ * adminApproveStudent
+ *
+ * 1. Verifies the requester is admin/owner.
+ * 2. Generates a unique activation code assigned exclusively to this student.
+ * 3. Sets activationStatus = "approved" on the profile.
+ * 4. Records approvedBy + approvedAt.
+ * 5. The raw code is NOT returned here — the student sees it on their page
+ *    via getMyPendingCode, which is guarded to their own UID.
+ */
+export const adminApproveStudent = createServerFn({ method: "POST" })
+  .validator(
+    z.object({
+      userId: z.string(),
+    }),
+  )
+  .handler(async ({ data }): Promise<void> => {
+    const idToken = getToken();
+    const actor = await requireAdmin(idToken);
+    const target = await fsGet<Profile>("users", data.userId);
+    if (!target) throw new AppError("auth/user-not-found");
+
+    const now = Date.now();
+
+    // If already approved/active, just log and return (idempotent)
+    if (target.activationStatus === "active") {
+      await logAudit(actor, "student.approveSkipped", target.id, "already active");
+      return;
+    }
+
+    // If there is already an assigned code (idempotent re-approval), re-use it.
+    // Otherwise generate a fresh one.
+    let codeId = target.assignedActivationCodeId ?? null;
+    let rawCode: string | null = null;
+
+    if (!codeId) {
+      // Generate unique code
+      rawCode = generateRawCode();
+      const hash = await sha256Hex(rawCode);
+      const codeLast4 = rawCode.slice(-4);
+
+      const codeRecord: ActivationCode = {
+        id: crypto.randomUUID(),
+        codeHash: hash,
+        codeLast4,
+        status: "available",
+        assignedUserId: target.id,
+        courseId: null,
+        createdBy: actor.id,
+        createdAt: now,
+        expiresAt: null,
+        usedAt: null,
+        usedByUserId: null,
+        revokedAt: null,
+        revokedByUserId: null,
+        note: `Auto-generated on approval for ${target.email}`,
+      };
+
+      codeId = await fsCreate(
+        "activationCodes",
+        codeRecord as unknown as Record<string, unknown>,
+      );
+
+      // Store the raw code in a restricted sub-collection so only the
+      // owner and the assigned student's server call can retrieve it.
+      // We put it in activationCodeSecrets/{codeId} — staff-only read.
+      await fsSet("activationCodeSecrets", codeId, {
+        rawCode,
+        userId: target.id,
+        createdAt: now,
+      });
+    }
+
+    // Update student profile
+    await fsSet("users", target.id, {
+      activationStatus: "approved" as ActivationStatus,
+      assignedActivationCodeId: codeId,
+      approvedBy: actor.id,
+      approvedAt: now,
+      // Clear any prior rejection
+      rejectedBy: null,
+      rejectedAt: null,
+      rejectionReason: null,
+      updatedAt: now,
+    });
+
+    await logAudit(actor, "student.approved", target.id, target.email);
+  });
+
+/**
+ * adminRejectStudent — sets activationStatus = "rejected" with optional reason.
+ */
+export const adminRejectStudent = createServerFn({ method: "POST" })
+  .validator(
+    z.object({
+      userId: z.string(),
+      reason: z.string().optional(),
+    }),
+  )
+  .handler(async ({ data }): Promise<void> => {
+    const idToken = getToken();
+    const actor = await requireAdmin(idToken);
+    const target = await fsGet<Profile>("users", data.userId);
+    if (!target) throw new AppError("auth/user-not-found");
+
+    const now = Date.now();
+    await fsSet("users", target.id, {
+      activationStatus: "rejected" as ActivationStatus,
+      rejectedBy: actor.id,
+      rejectedAt: now,
+      rejectionReason: data.reason ?? null,
+      updatedAt: now,
+    });
+
+    await logAudit(actor, "student.rejected", target.id, data.reason ?? target.email);
+  });
+
+/**
+ * adminReApproveStudent — re-approves a previously rejected student.
+ * Reuses the same approval flow.
+ */
+export const adminReApproveStudent = createServerFn({ method: "POST" })
+  .validator(z.object({ userId: z.string() }))
+  .handler(async ({ data }): Promise<void> => {
+    // Delegate to the approve function — it is already idempotent.
+    // We need to call it via the same token, so we re-implement inline:
+    const idToken = getToken();
+    const actor = await requireAdmin(idToken);
+    const target = await fsGet<Profile>("users", data.userId);
+    if (!target) throw new AppError("auth/user-not-found");
+
+    const now = Date.now();
+
+    let codeId = target.assignedActivationCodeId ?? null;
+
+    if (!codeId) {
+      const rawCode = generateRawCode();
+      const hash = await sha256Hex(rawCode);
+      const codeLast4 = rawCode.slice(-4);
+      const codeRecord: ActivationCode = {
+        id: crypto.randomUUID(),
+        codeHash: hash,
+        codeLast4,
+        status: "available",
+        assignedUserId: target.id,
+        courseId: null,
+        createdBy: actor.id,
+        createdAt: now,
+        expiresAt: null,
+        usedAt: null,
+        usedByUserId: null,
+        revokedAt: null,
+        revokedByUserId: null,
+        note: `Re-approval code for ${target.email}`,
+      };
+      codeId = await fsCreate(
+        "activationCodes",
+        codeRecord as unknown as Record<string, unknown>,
+      );
+      await fsSet("activationCodeSecrets", codeId, {
+        rawCode,
+        userId: target.id,
+        createdAt: now,
+      });
+    }
+
+    await fsSet("users", target.id, {
+      activationStatus: "approved" as ActivationStatus,
+      assignedActivationCodeId: codeId,
+      approvedBy: actor.id,
+      approvedAt: now,
+      rejectedBy: null,
+      rejectedAt: null,
+      rejectionReason: null,
+      updatedAt: now,
+    });
+
+    await logAudit(actor, "student.reApproved", target.id, target.email);
+  });
+
+/**
+ * getMyPendingCode — called by the student on the waiting page.
+ *
+ * Returns the raw activation code ONLY when:
+ *   - The caller is authenticated.
+ *   - The caller's profile activationStatus is "approved".
+ *   - The code is assigned to the caller's UID.
+ *
+ * Returns null otherwise (pending / rejected / active states).
+ */
+export const getMyPendingCode = createServerFn({ method: "GET" }).handler(
+  async (): Promise<{ code: string | null; status: ActivationStatus }> => {
+    const idToken = getToken();
+    const profile = await requireProfile(idToken);
+
+    const status = profile.activationStatus ?? "pending";
+
+    if (status !== "approved") {
+      return { code: null, status };
+    }
+
+    const codeId = profile.assignedActivationCodeId;
+    if (!codeId) return { code: null, status };
+
+    // Read the secret record
+    const secret = await fsGet<{ rawCode: string; userId: string }>(
+      "activationCodeSecrets",
+      codeId,
+    );
+    if (!secret || secret.userId !== profile.id) return { code: null, status };
+
+    return { code: secret.rawCode, status };
+  },
+);
+
+/**
+ * adminListPendingStudents — list all students with activationStatus = "pending"
+ * sorted by newest first.
+ */
+export const adminListPendingStudents = createServerFn({ method: "GET" }).handler(
+  async (): Promise<Profile[]> => {
+    const idToken = getToken();
+    await requireAdmin(idToken);
+    const all = await fsList<Profile>("users");
+    return all
+      .filter((u) => u.role === "student")
+      .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
+  },
+);

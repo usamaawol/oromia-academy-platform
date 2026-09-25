@@ -9,6 +9,7 @@ import {
   ClipboardList,
   GraduationCap,
   History,
+  KeyRound,
   LayoutDashboard,
   LogOut,
   Menu,
@@ -27,6 +28,8 @@ import { useTheme } from "@/components/theme";
 import { Badge } from "@/components/ui/badge";
 import { useI18n } from "@/i18n";
 import { useAuth } from "@/lib/auth";
+import { adminListPendingStudents } from "@/lib/server-fns";
+import { useServerFn } from "@/hooks/use-server-fn";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_admin")({
@@ -34,7 +37,8 @@ export const Route = createFileRoute("/_admin")({
 });
 
 const NAV_ITEMS = [
-  { to: "/admin/students", label: "admin.students", icon: Users },
+  { to: "/admin/students", label: "admin.students", icon: Users, badgeKey: "pending" },
+  { to: "/admin/activation-codes", label: "admin.activationCodes", icon: KeyRound },
   { to: "/admin/rankings", label: "common.rankings", icon: Trophy },
   { to: "/admin/courses", label: "admin.courses", icon: BookOpen },
   { to: "/admin/questions", label: "admin.questions", icon: ClipboardList },
@@ -52,12 +56,23 @@ function AdminLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const { theme, setTheme } = useTheme();
+  const call = useServerFn();
+  const [pendingCount, setPendingCount] = useState(0);
 
   useEffect(() => {
     if (!loading && (!user || !isStaff)) {
       void navigate({ to: user ? "/dashboard" : "/auth" });
     }
   }, [user, loading, isStaff, navigate]);
+
+  // Load pending student count for the sidebar badge
+  useEffect(() => {
+    if (!user || !isStaff) return;
+    void call(adminListPendingStudents, undefined)
+      .then((students) => setPendingCount((students as { activationStatus?: string }[]).filter((s) => (s.activationStatus ?? "pending") === "pending").length))
+      .catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, isStaff]);
 
   if (loading) {
     return (
@@ -131,8 +146,9 @@ function AdminLayout() {
             Navigation
           </p>
           <div className="space-y-0.5">
-            {NAV_ITEMS.map(({ to, label, icon: Icon }) => {
+            {NAV_ITEMS.map(({ to, label, icon: Icon, ...rest }) => {
               const active = pathname === to || pathname.startsWith(to + "/");
+              const showBadge = "badgeKey" in rest && rest.badgeKey === "pending" && pendingCount > 0;
               return (
                 <Link
                   key={to}
@@ -156,7 +172,15 @@ function AdminLayout() {
                     <Icon className="size-3.5" />
                   </div>
                   {t(label)}
-                  {active && (
+                  {showBadge && (
+                    <span className={cn(
+                      "ml-auto flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[10px] font-bold",
+                      active ? "bg-primary-foreground/20 text-primary-foreground" : "bg-destructive text-destructive-foreground",
+                    )}>
+                      {pendingCount}
+                    </span>
+                  )}
+                  {active && !showBadge && (
                     <span className="ml-auto size-1.5 rounded-full bg-primary-foreground/70" />
                   )}
                 </Link>

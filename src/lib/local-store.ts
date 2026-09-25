@@ -13,9 +13,11 @@ import {
   type AppNotification,
   type Question,
   type UserProfile,
+  type ActivationCode,
+  type Enrollment,
 } from "./types";
 
-const KEY = "oa.localdb.v1";
+const KEY = "oa.localdb.v2";
 
 export type LocalDb = {
   users: UserProfile[];
@@ -26,6 +28,8 @@ export type LocalDb = {
   notifications: AppNotification[];
   audit: AuditEntry[];
   settings: AcademySettings;
+  activationCodes: ActivationCode[];
+  enrollments: Enrollment[];
 };
 
 export function uid(prefix = "id"): string {
@@ -308,6 +312,8 @@ function seed(): LocalDb {
     ],
     audit: [],
     settings: DEFAULT_SETTINGS,
+    activationCodes: [],
+    enrollments: [],
   };
 }
 

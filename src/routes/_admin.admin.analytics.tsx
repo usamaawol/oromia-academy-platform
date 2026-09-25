@@ -64,6 +64,24 @@ function AnalyticsPage() {
             ))}
           </div>
 
+          {/* Registration funnel cards */}
+          <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-5">
+            {[
+              { label: "Waliigala", value: (data as { totalStudents?: number }).totalStudents ?? 0, color: "text-foreground" },
+              { label: "Eeggachaa (Pending)", value: (data as { pendingStudents?: number }).pendingStudents ?? 0, color: "text-yellow-600 dark:text-yellow-400" },
+              { label: "Eeyyamame (Approved)", value: (data as { approvedStudents?: number }).approvedStudents ?? 0, color: "text-blue-600 dark:text-blue-400" },
+              { label: "Hojiirra jira (Activated)", value: (data as { activatedStudents?: number }).activatedStudents ?? 0, color: "text-emerald-600 dark:text-emerald-400" },
+              { label: "Didame (Rejected)", value: (data as { rejectedStudents?: number }).rejectedStudents ?? 0, color: "text-red-500" },
+            ].map(({ label, value, color }) => (
+              <Card key={label}>
+                <CardContent className="p-4 text-center">
+                  <p className={`text-2xl font-bold ${color}`}>{String(value)}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">{label}</p>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+
           {/* Chart */}
           {data.examStats.length > 0 && (
             <Card>

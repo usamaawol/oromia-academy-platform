@@ -1,4 +1,13 @@
 export type Role = "owner" | "admin" | "instructor" | "student";
+/**
+ * pending   — just registered, waiting for admin approval
+ * approved  — admin approved, unique activation code is visible to student
+ * active    — student entered their code and activated the account
+ * rejected  — admin rejected the registration
+ * suspended — admin suspended an active account
+ * expired   — enrollment/code expired
+ */
+export type ActivationStatus = "pending" | "approved" | "active" | "rejected" | "suspended" | "expired";
 
 export type UserProfile = {
   id: string;
@@ -10,11 +19,56 @@ export type UserProfile = {
   nickname?: string; // anonymous display name for leaderboards
   role: Role;
   status?: "active" | "suspended";
+  activationStatus?: ActivationStatus;
+  activatedAt?: number;
+  activationCodeId?: string;
+  /** ID of the auto-generated unique activation code assigned at registration. */
+  assignedActivationCodeId?: string;
+  approvedBy?: string;
+  approvedAt?: number;
+  rejectedBy?: string;
+  rejectedAt?: number;
+  rejectionReason?: string;
   enrolledCourseIds: string[];
   courseIds?: string[]; // server-side alias — same data
   progress?: Record<string, number>;
   createdAt?: number;
   updatedAt?: number;
+};
+
+export type ActivationCodeStatus = "available" | "used" | "expired" | "revoked";
+
+export type ActivationCode = {
+  id: string;
+  codeHash: string;
+  codeLast4: string;
+  status: ActivationCodeStatus;
+  assignedUserId: string | null;
+  courseId: string | null;
+  createdBy: string | null;
+  createdAt: number;
+  expiresAt: number | null;
+  usedAt: number | null;
+  usedByUserId: string | null;
+  revokedAt: number | null;
+  revokedByUserId: string | null;
+  note?: string;
+};
+
+export type EnrollmentStatus = "pending" | "active" | "suspended" | "expired" | "cancelled";
+export type PaymentStatus = "pending" | "paid" | "failed" | "refunded";
+
+export type Enrollment = {
+  id: string;
+  userId: string;
+  courseId: string;
+  status: EnrollmentStatus;
+  paymentStatus: PaymentStatus;
+  activatedByCodeId: string | null;
+  enrolledAt: number | null;
+  expiresAt: number | null;
+  createdAt: number;
+  updatedAt: number;
 };
 
 export type Course = {

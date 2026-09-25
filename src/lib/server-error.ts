@@ -11,6 +11,16 @@ const CODE_KEYS: Record<string, TranslationKey> = {
   "auth/forbidden": "error.auth.forbidden",
   "auth/suspended": "error.auth.suspended",
   "ai/not-configured": "error.ai.notConfigured",
+  "activation/invalid-code": "error.activation.invalidCode",
+  "activation/code-used": "error.activation.codeUsed",
+  "activation/code-expired": "error.activation.codeExpired",
+  "activation/code-revoked": "error.activation.codeRevoked",
+  "activation/code-wrong-user": "error.activation.codeWrongUser",
+  "activation/account-locked": "error.activation.accountLocked",
+  "activation/activation-required": "error.activation.activationRequired",
+  "activation/not-approved": "error.activation.notApproved",
+  "activation/not-found": "error.activation.notFound",
+  "exam/not-enrolled": "error.exam.notEnrolled",
 };
 
 type Translator = (key: TranslationKey, vars?: Record<string, string | number>) => string;
