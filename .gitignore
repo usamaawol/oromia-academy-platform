@@ -37,3 +37,4 @@ dist-ssr
 # Temp / script helper files
 _*.txt
 _*.sh
+.vercel/
