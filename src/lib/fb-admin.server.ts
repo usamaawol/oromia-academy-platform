@@ -324,32 +324,43 @@ export async function fsQuery<T>(collection: string, filters: Filter[], limit = 
 /* --------------------------- identity verification --------------------------- */
 
 /**
- * Resolve the Firebase Web API key used for verifying client ID tokens.
+ * The Firebase Web API key is PUBLIC client configuration — it is safe to
+ * embed in server code. It is already shipped verbatim in the client JS bundle
+ * and in every Firebase SDK initialisation call, so there is no security
+ * concern with having it here as a compile-time fallback.
  *
- * On Vercel / serverless runtimes, `VITE_*` variables are only baked into
- * client bundles at build time. Server-side, TanStack Start / Nitro / Vercel
- * typically expose them through `import.meta.env` (Vite SSR) or plain
- * `process.env` if the user added them to the Vercel project settings.
- *
- * We also accept a bare `FIREBASE_API_KEY` / `GOOGLE_API_KEY` so operators can
- * avoid the VITE_ prefix entirely on the server.
+ * Resolution order (first non-empty value wins):
+ *   1. GOOGLE_API_KEY   — server-only env var, no VITE_ prefix needed
+ *   2. FIREBASE_API_KEY — server-only env var, no VITE_ prefix needed
+ *   3. VITE_FIREBASE_API_KEY — baked in at build time by Vite for client AND
+ *      available in process.env when set in Vercel project settings (with the
+ *      vercel nitro preset, all env vars are forwarded to the Node runtime)
+ *   4. Compile-time literal — guarantees the server always has a key even
+ *      when none of the above env vars are set (e.g. cold Vercel deployments
+ *      where only VITE_* were configured)
  */
-function resolveFirebaseApiKey(): string | undefined {
-  const direct =
+function resolveFirebaseApiKey(): string {
+  // Runtime env vars (process.env works on Node.js / Vercel serverless)
+  const fromEnv =
     process.env["GOOGLE_API_KEY"] ??
     process.env["FIREBASE_API_KEY"] ??
     process.env["VITE_FIREBASE_API_KEY"];
-  if (direct) return direct;
+  if (fromEnv) return fromEnv;
 
+  // import.meta.env is populated during Vite SSR dev mode
   if (typeof import.meta !== "undefined") {
     const env = (import.meta as unknown as Record<string, Record<string, string> | undefined>).env;
     if (env) {
-      const vite = env["VITE_FIREBASE_API_KEY"] ?? env["FIREBASE_API_KEY"] ?? env["GOOGLE_API_KEY"];
+      const vite =
+        env["VITE_FIREBASE_API_KEY"] ?? env["FIREBASE_API_KEY"] ?? env["GOOGLE_API_KEY"];
       if (vite) return vite;
     }
   }
 
-  return undefined;
+  // Compile-time fallback — this is the public web API key already present in
+  // firebase.ts and shipped in the client bundle. Embedding it here ensures the
+  // server can verify ID tokens even when env vars are misconfigured.
+  return "AIzaSyBHO0E9No9m90MCWjO48NIUak1DwVhA35s";
 }
 
 export type VerifiedUser = { uid: string; email: string; emailVerified: boolean; name: string };
@@ -362,12 +373,6 @@ export async function verifyIdToken(idToken: string): Promise<VerifiedUser> {
   if (!idToken) throw new Error("auth/required");
 
   const key = resolveFirebaseApiKey();
-  if (!key) {
-    throw new Error(
-      "Firebase API key is not configured on the server. " +
-        "Set GOOGLE_API_KEY, FIREBASE_API_KEY, or VITE_FIREBASE_API_KEY in Vercel project settings.",
-    );
-  }
 
   let res: Response;
   try {
