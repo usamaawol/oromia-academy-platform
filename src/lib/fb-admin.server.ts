@@ -378,15 +378,111 @@ function resolveFirebaseApiKey(): string {
 
 export type VerifiedUser = { uid: string; email: string; emailVerified: boolean; name: string };
 
+/* ── Google public-key cache for JWT verification ── */
+type JwkSet = { keys: JsonWebKey[] };
+let jwkCache: { keys: JsonWebKey[]; expiresAt: number } | null = null;
+
+async function fetchGooglePublicKeys(): Promise<JsonWebKey[]> {
+  if (jwkCache && jwkCache.expiresAt > Date.now()) return jwkCache.keys;
+  const res = await fetch(
+    "https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com",
+  );
+  if (!res.ok) throw new Error(`Failed to fetch Google public keys: ${res.status}`);
+  const data = (await res.json()) as JwkSet;
+  // Cache for 1 hour (keys rotate every ~6 h)
+  jwkCache = { keys: data.keys, expiresAt: Date.now() + 60 * 60 * 1000 };
+  return data.keys;
+}
+
+function base64urlDecode(s: string): Uint8Array {
+  const padded = s.replace(/-/g, "+").replace(/_/g, "/").padEnd(s.length + ((4 - (s.length % 4)) % 4), "=");
+  const bin = atob(padded);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
 /**
- * Validates a Firebase ID token with Google's identity service. The client can
- * never fake this: an invalid or expired token is rejected upstream.
+ * Verifies a Firebase ID token by validating its RS256 JWT signature against
+ * Google's published public keys. No external API key is required — this works
+ * regardless of any API key restrictions set in the Google Cloud Console.
+ *
+ * Falls back to the Identity Toolkit REST API if WebCrypto is unavailable.
  */
 export async function verifyIdToken(idToken: string): Promise<VerifiedUser> {
   if (!idToken) throw new Error("auth/required");
 
-  const key = resolveFirebaseApiKey();
+  const parts = idToken.split(".");
+  if (parts.length !== 3) throw new Error("auth/invalid-session");
 
+  // Decode header and payload without verifying yet
+  let header: { kid?: string; alg?: string };
+  let payload: {
+    sub?: string;
+    email?: string;
+    email_verified?: boolean;
+    name?: string;
+    aud?: string | string[];
+    iss?: string;
+    exp?: number;
+    iat?: number;
+  };
+  try {
+    header = JSON.parse(new TextDecoder().decode(base64urlDecode(parts[0]!))) as typeof header;
+    payload = JSON.parse(new TextDecoder().decode(base64urlDecode(parts[1]!))) as typeof payload;
+  } catch {
+    throw new Error("auth/invalid-session");
+  }
+
+  // Basic claims validation
+  const now = Math.floor(Date.now() / 1000);
+  if (!payload.sub) throw new Error("auth/invalid-session");
+  if (payload.exp && payload.exp < now) throw new Error("auth/invalid-session");
+  if (payload.iat && payload.iat > now + 300) throw new Error("auth/invalid-session"); // clock skew
+  // Audience must be our Firebase project
+  const pid = projectId();
+  const aud = Array.isArray(payload.aud) ? payload.aud : [payload.aud ?? ""];
+  if (!aud.includes(pid)) throw new Error("auth/invalid-session");
+  // Issuer must be Firebase
+  if (payload.iss && !payload.iss.includes("securetoken.google.com")) {
+    throw new Error("auth/invalid-session");
+  }
+
+  // Try WebCrypto signature verification (works on Node.js 18+ and CF Workers)
+  if (typeof crypto?.subtle?.verify === "function" && header.alg === "RS256") {
+    try {
+      const keys = await fetchGooglePublicKeys();
+      const jwk = header.kid ? keys.find((k) => (k as { kid?: string }).kid === header.kid) : keys[0];
+      if (jwk) {
+        const cryptoKey = await crypto.subtle.importKey(
+          "jwk",
+          jwk,
+          { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+          false,
+          ["verify"],
+        );
+        const signingInput = new TextEncoder().encode(`${parts[0]}.${parts[1]}`);
+        const signature = base64urlDecode(parts[2]!);
+        const valid = await crypto.subtle.verify("RSASSA-PKCS1-v1_5", cryptoKey, signature, signingInput);
+        if (!valid) throw new Error("auth/invalid-session");
+        // Signature verified — return claims directly, no REST call needed
+        return {
+          uid: payload.sub,
+          email: payload.email ?? "",
+          emailVerified: Boolean(payload.email_verified),
+          name: payload.name ?? "",
+        };
+      }
+    } catch (err) {
+      // If crypto verification itself throws "auth/invalid-session" re-throw it
+      if ((err as Error | undefined)?.message === "auth/invalid-session") throw err;
+      // Otherwise fall through to REST API fallback
+      console.warn("[fb-admin] JWT crypto verify failed, falling back to REST API:", (err as Error | undefined)?.message);
+    }
+  }
+
+  // Fallback: Identity Toolkit REST API (requires web API key, may be rate-limited)
+  const key = resolveFirebaseApiKey();
   let res: Response;
   try {
     res = await fetch(
@@ -401,12 +497,8 @@ export async function verifyIdToken(idToken: string): Promise<VerifiedUser> {
     throw new Error("auth/network-error", { cause: cause as Error });
   }
 
-  if (res.status === 400) {
-    throw new Error("auth/invalid-session");
-  }
-  if (!res.ok) {
-    throw new Error(`auth/id-token-check-failed (${res.status})`);
-  }
+  if (res.status === 400) throw new Error("auth/invalid-session");
+  if (!res.ok) throw new Error(`auth/id-token-check-failed (${res.status})`);
 
   const json = (await res.json()) as {
     users?: { localId: string; email?: string; emailVerified?: boolean; displayName?: string }[];
