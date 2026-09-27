@@ -257,6 +257,7 @@ function ExamRunner({
   const [saving, setSaving] = useState(false);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [isFullscreen, setIsFullscreen] = useState(!!document.fullscreenElement);
+  const [tabSwitchCount, setTabSwitchCount] = useState(0);
   const saveQueue = useRef<Map<string, string>>(new Map());
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -305,15 +306,53 @@ function ExamRunner({
     return () => document.removeEventListener("fullscreenchange", handler);
   }, []);
 
-  // Tab visibility
+  // Tab visibility + anti-cheat
   useEffect(() => {
-    if (!view.attempt.requireFullscreen) return;
-    const handler = () => {
-      if (document.hidden) toast.warning(t("exam.tabWarning"));
+    // Block right-click
+    const noContext = (e: MouseEvent) => e.preventDefault();
+    document.addEventListener("contextmenu", noContext);
+
+    // Block keyboard shortcuts
+    const noShortcut = (e: KeyboardEvent) => {
+      const ctrl = e.ctrlKey || e.metaKey;
+      if (
+        (ctrl && e.key === "c") ||
+        (ctrl && e.key === "v") ||
+        (ctrl && e.key === "a") ||
+        (ctrl && e.key === "Tab") ||
+        (e.altKey && e.key === "Tab") ||
+        e.key === "F12" ||
+        (ctrl && e.shiftKey && e.key === "I") ||
+        (ctrl && e.shiftKey && e.key === "J") ||
+        (ctrl && e.key === "u")
+      ) {
+        e.preventDefault();
+      }
     };
-    document.addEventListener("visibilitychange", handler);
-    return () => document.removeEventListener("visibilitychange", handler);
-  }, [view.attempt.requireFullscreen, t]);
+    document.addEventListener("keydown", noShortcut);
+
+    // Tab switch tracking
+    const visibilityHandler = () => {
+      if (document.hidden) {
+        setTabSwitchCount((c) => c + 1);
+        toast.warning(t("exam.tabWarning"));
+      }
+    };
+    document.addEventListener("visibilitychange", visibilityHandler);
+
+    return () => {
+      document.removeEventListener("contextmenu", noContext);
+      document.removeEventListener("keydown", noShortcut);
+      document.removeEventListener("visibilitychange", visibilityHandler);
+    };
+  }, [t]);
+
+  // Force fullscreen on start
+  useEffect(() => {
+    if (view.attempt.requireFullscreen && !document.fullscreenElement) {
+      void document.documentElement.requestFullscreen().catch(() => {/* user may deny */});
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const currentQuestion: PublicQuestion = view.questions[currentIdx]!;
   const questionCount = view.questions.length;
@@ -401,12 +440,34 @@ function ExamRunner({
 
   return (
     <div className="flex min-h-screen flex-col bg-background">
+      {/* Fullscreen blocking overlay */}
+      {view.attempt.requireFullscreen && !isFullscreen && (
+        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/95 text-white text-center p-8">
+          <Maximize className="size-16 mb-4 text-yellow-400" />
+          <h2 className="text-2xl font-bold mb-2">Fullscreen Required</h2>
+          <p className="text-sm text-white/70 mb-6 max-w-sm">This exam must be taken in fullscreen mode. Click below to continue.</p>
+          <Button size="lg" onClick={() => void document.documentElement.requestFullscreen()}>
+            Enter Fullscreen to Continue
+          </Button>
+        </div>
+      )}
+
       {/* Header bar */}
       <div className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur">
         <div className="mx-auto flex h-14 w-full max-w-4xl items-center gap-3 px-4">
           <span className="text-sm font-medium text-muted-foreground">
             {view.attempt.examTitle}
           </span>
+          {tabSwitchCount > 0 && (
+            <span className={cn(
+              "flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold",
+              tabSwitchCount >= 3
+                ? "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-400 animate-pulse"
+                : "bg-yellow-100 text-yellow-700 dark:bg-yellow-950 dark:text-yellow-400",
+            )}>
+              ⚠ {tabSwitchCount} tab switch{tabSwitchCount !== 1 ? "es" : ""} detected
+            </span>
+          )}
           <div className="ml-auto flex items-center gap-3">
             {saving && (
               <span className="text-xs text-muted-foreground animate-pulse">{t("exam.saved")}</span>

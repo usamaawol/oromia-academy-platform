@@ -4,9 +4,12 @@ import { useState } from "react";
 
 import { useTheme } from "@/components/theme";
 import { Button } from "@/components/ui/button";
-import { useI18n } from "@/i18n";
+import { useI18n, type Lang } from "@/i18n";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
+
+const LANGS: Lang[] = ["om", "en", "am", "ar"];
+const LANG_LABELS: Record<Lang, string> = { om: "OM", en: "EN", am: "አማ", ar: "عر" };
 
 export function SiteHeader() {
   const { t, lang, setLang } = useI18n();
@@ -59,11 +62,14 @@ export function SiteHeader() {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => setLang(lang === "om" ? "en" : "om")}
+              onClick={() => {
+                const idx = LANGS.indexOf(lang);
+                setLang(LANGS[(idx + 1) % LANGS.length]!);
+              }}
               aria-label={t("common.language")}
             >
               <Languages className="size-4" />
-              <span className="ml-1 text-xs font-semibold uppercase">{lang}</span>
+              <span className="ml-1 text-xs font-semibold uppercase">{LANG_LABELS[lang]}</span>
             </Button>
             <Button variant="ghost" size="icon" onClick={toggle} aria-label={t("common.theme")}>
               {theme === "dark" ? <Sun className="size-4" /> : <Moon className="size-4" />}

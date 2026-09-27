@@ -114,8 +114,8 @@ service cloud.firestore {
       allow list: if true;
       // Staff create / update / archive courses via server (token == caller).
       allow create, update: if isStaff();
-      // Only owner can hard-delete courses.
-      allow delete: if isOwner();
+      // Admin (owner + admin) can hard-delete courses.
+      allow delete: if isAdmin();
     }
 
     // ==================== QUESTIONS COLLECTION ====================
@@ -123,9 +123,9 @@ service cloud.firestore {
     // STAFF ONLY. Students NEVER get read access to the correct answers.
     match /questions/{questionId} {
       allow read, list, create, update: if isStaff();
-      // Only owner can permanently delete questions; instructors soft-archive
+      // Admin (owner + admin) can permanently delete questions; instructors soft-archive
       // by toggling 'approved' or just stop using them in exams.
-      allow delete: if isOwner();
+      allow delete: if isAdmin();
     }
 
     // ==================== EXAMS COLLECTION ====================
@@ -142,7 +142,7 @@ service cloud.firestore {
       allow list: if isStaff() || signedIn();
       // Staff create / update exams via server (caller's own token)
       allow create, update: if isStaff();
-      allow delete: if isOwner();
+      allow delete: if isAdmin();
     }
 
     // ==================== EXAM SECRETS COLLECTION ====================
@@ -169,7 +169,7 @@ service cloud.firestore {
       allow update: if
         (signedIn() && resource.data.studentId == request.auth.uid)
         || isStaff();
-      allow delete: if isOwner();
+      allow delete: if isAdmin();
     }
 
     // ==================== ACTIVATION CODES COLLECTION ====================
@@ -236,9 +236,9 @@ service cloud.firestore {
     }
 
     // ==================== AUDIT LOGS COLLECTION ====================
-    // Security audit trail — only OWNER can read/write.
+    // Security audit trail — only ADMIN can read/write.
     match /auditLogs/{entryId} {
-      allow read, list, create: if isOwner();
+      allow read, list, create: if isAdmin();
       allow update, delete: if false;
     }
 
@@ -256,4 +256,4 @@ service cloud.firestore {
     }
   }
 }
-yu./l;,
+ 

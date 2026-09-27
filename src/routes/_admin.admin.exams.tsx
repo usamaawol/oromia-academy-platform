@@ -192,6 +192,59 @@ function parsePdfText(raw: string): ParsedQuestion[] {
 }
 
 // ---------------------------------------------------------------------------
+// Admin exam text download helper
+// ---------------------------------------------------------------------------
+function downloadExamPdf(exam: Exam, allQuestions: Question[]) {
+  const examQuestions = exam.questionIds.map(id => allQuestions.find(q => q.id === id)).filter(Boolean) as Question[];
+  const lines: string[] = [
+    "========================================",
+    "  OROMIA ACADEMY — EXAM PAPER (ADMIN)",
+    "========================================",
+    `Title    : ${exam.title}`,
+    `Duration : ${exam.durationMin} min`,
+    `Pass Mark: ${exam.passMark}%`,
+    `Questions: ${examQuestions.length}`,
+    `Status   : ${exam.status}`,
+    exam.createdAt ? `Created  : ${new Date(exam.createdAt).toLocaleString()}` : "",
+    exam.updatedAt ? `Updated  : ${new Date(exam.updatedAt).toLocaleString()}` : "",
+    "",
+    "========================================",
+    "  QUESTIONS & ANSWERS",
+    "========================================",
+    "",
+  ];
+  examQuestions.forEach((q, i) => {
+    lines.push(`Q${i+1}. ${q.textOm}${q.textEn ? " / " + q.textEn : ""}`);
+    lines.push(`   Type: ${q.type} | Points: ${q.points}`);
+    if (q.type === "mcq") {
+      q.options.forEach((opt, oi) => {
+        const letter = String.fromCharCode(65 + oi);
+        const isCorrect = opt.id === q.correctOptionId;
+        lines.push(`   ${isCorrect ? "✓" : " "} ${letter}. ${opt.textOm}${opt.textEn ? " / " + opt.textEn : ""}`);
+      });
+    } else if (q.type === "truefalse") {
+      lines.push(`   Correct: ${q.correctBool ? "True" : "False"}`);
+    } else if (q.expectedAnswer) {
+      lines.push(`   Expected: ${q.expectedAnswer}`);
+    }
+    if (q.rubric) lines.push(`   Rubric: ${q.rubric}`);
+    lines.push("");
+  });
+  lines.push(`Generated: ${new Date().toLocaleString()}`);
+  lines.push("ADMIN ONLY — DO NOT SHARE");
+
+  const blob = new Blob([lines.filter(l => l !== null).join("\n")], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `Exam-${exam.title.replace(/\s+/g, "_")}-ADMIN.txt`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// ---------------------------------------------------------------------------
 // ExamsPage
 // ---------------------------------------------------------------------------
 
@@ -584,6 +637,12 @@ function ExamsPage() {
                       <span>Pass: {exam.passMark}%</span>
                       {exam.showAnswersAfter && <span className="text-green-600">Shows answers</span>}
                       {exam.pdfUrl && <span className="text-primary">📄 PDF attached</span>}
+                      {exam.createdAt && (
+                        <span title="Created">📅 {new Date(exam.createdAt).toLocaleDateString()}</span>
+                      )}
+                      {exam.updatedAt && exam.updatedAt !== exam.createdAt && (
+                        <span title="Last updated">🔄 {new Date(exam.updatedAt).toLocaleDateString()}</span>
+                      )}
                     </div>
                   </div>
                   <div className="flex gap-1 shrink-0">
@@ -605,6 +664,13 @@ function ExamsPage() {
                       ) : (
                         <><Zap className="size-3.5" /> Publish</>
                       )}
+                    </Button>
+                    <Button
+                      variant="ghost" size="icon"
+                      title="Download exam (admin)"
+                      onClick={() => downloadExamPdf(exam, questions)}
+                    >
+                      <Download className="size-4 text-primary" />
                     </Button>
                     <Button variant="ghost" size="icon" onClick={() => openEdit(exam)}>
                       <Pencil className="size-4" />

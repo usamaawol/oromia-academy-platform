@@ -54,8 +54,8 @@ import { serverErrorMessage } from "@/lib/server-error";
 import { useServerFn } from "@/hooks/use-server-fn";
 import { saveUserProfile } from "@/lib/db";
 import type { Exam, Attempt } from "@/lib/schema";
-import { listNotifications } from "@/lib/data";
-import type { AppNotification } from "@/lib/types";
+import { listNotifications, getSettings } from "@/lib/data";
+import type { AppNotification, AcademySettings } from "@/lib/types";
 import { getFirebaseAuth, firebaseReady } from "@/lib/firebase";
 import { onAuthStateChanged } from "firebase/auth";
 import { cn } from "@/lib/utils";
@@ -70,7 +70,7 @@ export const Route = createFileRoute("/_authed/dashboard")({
   component: DashboardPage,
 });
 
-type Tab = "overview" | "exams" | "attempts" | "results" | "profile" | "ranking";
+type Tab = "overview" | "exams" | "attempts" | "results" | "profile" | "ranking" | "announcements";
 
 type RankingItem = {
   id: string | null;
@@ -103,6 +103,7 @@ function DashboardPage() {
   const [rankings, setRankings] = useState<RankingItem[]>([]);
   const [rankingsPublished, setRankingsPublished] = useState(false);
   const [myRank, setMyRank] = useState<RankingItem | null>(null);
+  const [settings, setSettings] = useState<AcademySettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [editingProfile, setEditingProfile] = useState(false);
   const [profileForm, setProfileForm] = useState({
@@ -148,6 +149,13 @@ function DashboardPage() {
         setRankings(r.all);
         setRankingsPublished(r.rankingsPublished);
         setMyRank(r.myRank);
+        // Load academy settings for announcements tab
+        try {
+          const s = await getSettings();
+          setSettings(s);
+        } catch {
+          // settings are optional — silently ignore
+        }
       } catch (err) {
         console.error(err);
         // Suppress session-expired toasts on first load — token may still be
@@ -347,6 +355,15 @@ function DashboardPage() {
                             #{myRank.rank}
                           </Badge>
                         )}
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                    <SidebarMenuItem>
+                      <SidebarMenuButton
+                        isActive={activeTab === "announcements"}
+                        onClick={() => setActiveTab("announcements")}
+                      >
+                        <Bell />
+                        <span>Announcements</span>
                       </SidebarMenuButton>
                     </SidebarMenuItem>
                   </SidebarMenu>
@@ -1108,6 +1125,40 @@ function DashboardPage() {
                     </CardContent>
                   </Card>
                 ) : null}
+              </section>
+            )}
+            {activeTab === "announcements" && (
+              <section>
+                <h2 className="text-xl font-semibold mb-4">Announcements</h2>
+                {settings ? (
+                  <div className="space-y-4">
+                    {(lang === "om" ? settings.announcementOm : settings.announcementEn) ? (
+                      <div className="rounded-xl border bg-card p-5">
+                        <p className="whitespace-pre-line text-sm leading-relaxed">
+                          {lang === "om" ? settings.announcementOm : settings.announcementEn}
+                        </p>
+                      </div>
+                    ) : (
+                      <p className="text-muted-foreground">No announcements at this time.</p>
+                    )}
+                    {settings.telegramHandle && (
+                      <div className="rounded-xl border bg-muted/30 p-4 flex items-center gap-3">
+                        <div className="grid size-10 place-items-center rounded-full bg-blue-500/10 text-blue-500 font-bold">T</div>
+                        <div className="flex-1">
+                          <p className="text-sm font-medium">Join our Telegram</p>
+                          <p className="text-xs text-muted-foreground">{settings.telegramHandle}</p>
+                        </div>
+                        {settings.telegramUrl && (
+                          <a href={settings.telegramUrl} target="_blank" rel="noopener noreferrer">
+                            <Button variant="outline" size="sm">Join</Button>
+                          </a>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-muted-foreground">Loading...</p>
+                )}
               </section>
             )}
           </main>

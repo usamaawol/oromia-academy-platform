@@ -17,11 +17,14 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const stored = window.localStorage.getItem(STORAGE_KEY);
-    if (stored === "om" || stored === "en") setLangState(stored);
+    if (stored === "om" || stored === "en" || stored === "am" || stored === "ar") setLangState(stored as Lang);
   }, []);
 
   useEffect(() => {
-    document.documentElement.lang = lang === "om" ? "om" : "en";
+    const langMap: Record<Lang, string> = { om: "om", en: "en", am: "am", ar: "ar" };
+    document.documentElement.lang = langMap[lang] ?? "en";
+    // Arabic is RTL
+    document.documentElement.dir = lang === "ar" ? "rtl" : "ltr";
   }, [lang]);
 
   const setLang = useCallback((l: Lang) => {
@@ -31,7 +34,7 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
 
   const t = useCallback(
     (key: TranslationKey, vars?: Record<string, string | number>) => {
-      let value: string = dictionaries[lang][key] ?? dictionaries.om[key] ?? key;
+      let value: string = dictionaries[lang][key] ?? dictionaries.en[key] ?? dictionaries.om[key] ?? key;
       if (vars) {
         for (const [k, v] of Object.entries(vars)) {
           value = value.replaceAll(`{${k}}`, String(v));
@@ -58,7 +61,7 @@ export function localized(
   om?: string | null,
   en?: string | null,
 ): string {
-  if (lang === "om") return (om || en || "").trim();
+  if (lang === "om" || lang === "am") return (om || en || "").trim();
   return (en || om || "").trim();
 }
 
