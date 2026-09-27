@@ -330,24 +330,37 @@ export async function fsQuery<T>(collection: string, filters: Filter[], limit = 
  * concern with having it here as a compile-time fallback.
  *
  * Resolution order (first non-empty value wins):
- *   1. GOOGLE_API_KEY   — server-only env var, no VITE_ prefix needed
- *   2. FIREBASE_API_KEY — server-only env var, no VITE_ prefix needed
- *   3. VITE_FIREBASE_API_KEY — baked in at build time by Vite for client AND
- *      available in process.env when set in Vercel project settings (with the
- *      vercel nitro preset, all env vars are forwarded to the Node runtime)
- *   4. Compile-time literal — guarantees the server always has a key even
- *      when none of the above env vars are set (e.g. cold Vercel deployments
- *      where only VITE_* were configured)
+ *   1. globalThis.__env__ — Cloudflare Workers / Nitro cloudflare-module preset.
+ *      Nitro's module handler sets `globalThis.__env__ = env` on every request,
+ *      making all CF Worker bindings (Vars, Secrets) reachable here. This is the
+ *      path used by the Lovable sandbox preview and CF-deployed builds.
+ *   2. process.env — Node.js runtimes: Vercel serverless, local `npm run dev`.
+ *      Works when the env var is set in Vercel project settings or in .env.
+ *   3. import.meta.env — Vite SSR build-time injection for VITE_* variables.
+ *   4. Compile-time literal — the same public key already shipped in firebase.ts
+ *      and the client bundle; guarantees the server always has a key.
  */
 function resolveFirebaseApiKey(): string {
-  // Runtime env vars (process.env works on Node.js / Vercel serverless)
+  // 1. Cloudflare Workers env bindings (set by nitro's cloudflare-module handler)
+  const cfEnv = (
+    globalThis as unknown as { __env__?: Record<string, string | undefined> }
+  ).__env__;
+  if (cfEnv) {
+    const cf =
+      cfEnv["GOOGLE_API_KEY"] ??
+      cfEnv["FIREBASE_API_KEY"] ??
+      cfEnv["VITE_FIREBASE_API_KEY"];
+    if (cf) return cf;
+  }
+
+  // 2. Node.js process.env (Vercel serverless, local dev)
   const fromEnv =
     process.env["GOOGLE_API_KEY"] ??
     process.env["FIREBASE_API_KEY"] ??
     process.env["VITE_FIREBASE_API_KEY"];
   if (fromEnv) return fromEnv;
 
-  // import.meta.env is populated during Vite SSR dev mode
+  // 3. Vite SSR build-time injection
   if (typeof import.meta !== "undefined") {
     const env = (import.meta as unknown as Record<string, Record<string, string> | undefined>).env;
     if (env) {
@@ -357,9 +370,9 @@ function resolveFirebaseApiKey(): string {
     }
   }
 
-  // Compile-time fallback — this is the public web API key already present in
-  // firebase.ts and shipped in the client bundle. Embedding it here ensures the
-  // server can verify ID tokens even when env vars are misconfigured.
+  // 4. Compile-time fallback — the public web API key already present in
+  // firebase.ts and shipped in the client bundle. Embedding it here ensures
+  // the server can verify ID tokens even when no env vars are configured.
   return "AIzaSyBHO0E9No9m90MCWjO48NIUak1DwVhA35s";
 }
 

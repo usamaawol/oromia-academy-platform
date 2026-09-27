@@ -7,6 +7,8 @@
  *   user never sends a stale/expired token.
  * - If `auth.currentUser` is null right after sign-up (Firebase SDK still
  *   hydrating), waits up to 3 s for it to appear before giving up.
+ * - Always injects the `x-id-token` header regardless of runtime/preset,
+ *   so the server can authenticate on Vercel (Node.js) and Cloudflare alike.
  */
 import { useCallback } from "react";
 import { getIdToken, onAuthStateChanged } from "firebase/auth";
@@ -56,10 +58,12 @@ export function useServerFn() {
       }
     }
 
-    const callable = fn as ServerFnCallable & { url?: string };
-    if (typeof window !== "undefined" && callable.url) {
-      return (await callable({ data, headers: { "x-id-token": idToken } })) as TOutput;
-    }
-    return (await callable({ data })) as TOutput;
+    // Always inject x-id-token. TanStack Start server functions accept a
+    // `headers` option that is forwarded as request headers on the server.
+    // The previous guard (`callable.url`) was skipping header injection on
+    // Vercel's Node.js runtime where `.url` may be absent on the function
+    // object, causing every authenticated call to fail with auth/required.
+    const callable = fn as ServerFnCallable;
+    return (await callable({ data, headers: { "x-id-token": idToken } })) as TOutput;
   }, []);
 }
