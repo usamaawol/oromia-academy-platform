@@ -8,32 +8,26 @@ import {
 } from "firebase/firestore";
 import { getStorage, type FirebaseStorage } from "firebase/storage";
 
-// Firebase web API keys are PUBLIC client configuration — safe to embed in
-// source code. They are already visible in every browser network request and
-// are not secret. The VITE_* env vars are preferred when available (lets the
-// key be overridden per-environment), but the literals below are the project
-// defaults and will always work for this Firebase project.
-const env = import.meta.env;
-
-// Helper: return env var value only if it looks like a real key (not a
-// placeholder like "your-firebase-web-api-key" or an empty string).
-function envOrFallback(envKey: string, fallback: string): string {
-  const v = env[envKey] as string | undefined;
-  if (v && v.length > 10 && !v.startsWith("your-") && !v.includes("placeholder")) return v;
-  return fallback;
-}
-
+// Firebase web configuration for Oromia Academy.
+//
+// These are PUBLIC client-side values — not secrets. Firebase web API keys
+// identify the project to Google; they appear in every network request and
+// the Firebase console. It is safe and correct to embed them here.
+//
+// We do NOT read VITE_FIREBASE_* env vars for the core config because Vercel
+// (and other hosts) may inject incorrect or placeholder values that override
+// these correct literals at build time, causing auth/api-key-not-valid errors.
 export const firebaseConfig = {
-  apiKey:            envOrFallback("VITE_FIREBASE_API_KEY",            "AIzaSyBHO0E9No9m90MCWjO48NIUak1DwVhA35s"),
-  authDomain:        envOrFallback("VITE_FIREBASE_AUTH_DOMAIN",        "oromia-academy.firebaseapp.com"),
-  projectId:         envOrFallback("VITE_FIREBASE_PROJECT_ID",         "oromia-academy"),
-  storageBucket:     envOrFallback("VITE_FIREBASE_STORAGE_BUCKET",     "oromia-academy.firebasestorage.app"),
-  messagingSenderId: envOrFallback("VITE_FIREBASE_MESSAGING_SENDER_ID","754534143898"),
-  appId:             envOrFallback("VITE_FIREBASE_APP_ID",             "1:754534143898:web:1ee8549a7cec2cd0990c23"),
-  measurementId:     envOrFallback("VITE_FIREBASE_MEASUREMENT_ID",     "G-EGTGLPQ83E"),
+  apiKey:            "AIzaSyBHO0E9No9m90MCWjO48NIUak1DwVhA35s",
+  authDomain:        "oromia-academy.firebaseapp.com",
+  projectId:         "oromia-academy",
+  storageBucket:     "oromia-academy.firebasestorage.app",
+  messagingSenderId: "754534143898",
+  appId:             "1:754534143898:web:1ee8549a7cec2cd0990c23",
+  measurementId:     "G-EGTGLPQ83E",
 };
 
-export const firebaseReady = Boolean(firebaseConfig.apiKey);
+export const firebaseReady = true; // config is always present
 
 let app: FirebaseApp | null = null;
 let authInstance: Auth | null = null;
@@ -41,7 +35,6 @@ let dbInstance: Firestore | null = null;
 let storageInstance: FirebaseStorage | null = null;
 
 function getFirebaseApp(): FirebaseApp {
-  if (!firebaseReady) throw new Error("Firebase is not configured");
   if (!app) app = getApps().length ? getApp() : initializeApp(firebaseConfig);
   return app;
 }
