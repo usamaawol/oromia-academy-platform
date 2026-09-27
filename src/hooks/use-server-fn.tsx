@@ -2,16 +2,20 @@
  * Thin wrapper that calls a TanStack Start server function while injecting
  * the current Firebase ID token as the `x-id-token` request header.
  *
- * Changes from v1:
- * - Forces a token refresh (`forceRefresh = true`) so a freshly-signed-up
- *   user never sends a stale/expired token.
- * - If `auth.currentUser` is null right after sign-up (Firebase SDK still
- *   hydrating), waits up to 3 s for it to appear before giving up.
- * - Always injects the `x-id-token` header regardless of runtime/preset,
- *   so the server can authenticate on Vercel (Node.js) and Cloudflare alike.
+ * Token strategy:
+ * - Use the cached token when it has more than 5 minutes left (no network
+ *   round-trip needed for the vast majority of calls).
+ * - Force-refresh only when the token is within 5 minutes of expiry.
+ *   This avoids the race condition where multiple parallel server-function
+ *   calls each trigger force-refresh simultaneously, causing some of them to
+ *   get a token that was immediately superseded by another refresh, leading
+ *   to auth/invalid-session errors.
+ * - If auth.currentUser is null (Firebase SDK still hydrating after sign-up
+ *   or page load), wait up to 3 s for it to appear before giving up.
  */
 import { useCallback } from "react";
 import { getIdToken, onAuthStateChanged } from "firebase/auth";
+import type { User } from "firebase/auth";
 import { getFirebaseAuth, firebaseReady } from "@/lib/firebase";
 
 type ServerFnCallable = (opts: {
@@ -20,7 +24,7 @@ type ServerFnCallable = (opts: {
 }) => Promise<unknown>;
 
 /** Wait for Firebase to resolve the current user (up to `timeoutMs`). */
-function waitForCurrentUser(timeoutMs = 3000): Promise<import("firebase/auth").User | null> {
+function waitForCurrentUser(timeoutMs = 3000): Promise<User | null> {
   const auth = getFirebaseAuth();
   if (auth.currentUser) return Promise.resolve(auth.currentUser);
 
@@ -40,6 +44,52 @@ function waitForCurrentUser(timeoutMs = 3000): Promise<import("firebase/auth").U
   });
 }
 
+/**
+ * Returns true when the token will expire within the next `thresholdMs`.
+ * Firebase ID tokens have a 1-hour lifetime; `expirationTime` is an ISO
+ * string on the decoded token result.
+ */
+function isTokenNearExpiry(user: User, thresholdMs = 5 * 60 * 1000): boolean {
+  try {
+    // Firebase stores the token in memory; stsTokenManager is internal but
+    // stable across SDK versions. Access it safely with optional chaining.
+    const mgr = (user as unknown as { stsTokenManager?: { expirationTime?: number } })
+      .stsTokenManager;
+    if (!mgr?.expirationTime) return true; // unknown → refresh to be safe
+    return mgr.expirationTime - Date.now() < thresholdMs;
+  } catch {
+    return true; // if anything goes wrong, refresh
+  }
+}
+
+// Module-level token cache: avoids parallel force-refreshes when multiple
+// server functions are called at the same time on a single page load.
+let pendingTokenRefresh: Promise<string> | null = null;
+
+async function getToken(user: User): Promise<string> {
+  // If there's already a refresh in flight, wait for it instead of starting
+  // another one — this is the key fix for the parallel-call race condition.
+  if (pendingTokenRefresh) {
+    try {
+      return await pendingTokenRefresh;
+    } catch {
+      pendingTokenRefresh = null;
+    }
+  }
+
+  const needsRefresh = isTokenNearExpiry(user);
+  if (!needsRefresh) {
+    // Token is fresh — use the cached one without a network round-trip.
+    return getIdToken(user, false);
+  }
+
+  // Start a single refresh and share it with any concurrent callers.
+  pendingTokenRefresh = getIdToken(user, true).finally(() => {
+    pendingTokenRefresh = null;
+  });
+  return pendingTokenRefresh;
+}
+
 export function useServerFn() {
   return useCallback(async <TInput, TOutput>(fn: unknown, data?: TInput): Promise<TOutput> => {
     let idToken = "";
@@ -47,22 +97,16 @@ export function useServerFn() {
     if (firebaseReady) {
       try {
         const auth = getFirebaseAuth();
-        // If currentUser is null (auth still hydrating after signup), wait briefly.
         const currentUser = auth.currentUser ?? (await waitForCurrentUser(3000));
         if (currentUser) {
-          // forceRefresh = true ensures we never send an expired/stale token.
-          idToken = await getIdToken(currentUser, true);
+          idToken = await getToken(currentUser);
         }
       } catch {
-        /* offline — server will reject if auth is required */
+        /* offline or token error — server will reject if auth is required */
       }
     }
 
-    // Always inject x-id-token. TanStack Start server functions accept a
-    // `headers` option that is forwarded as request headers on the server.
-    // The previous guard (`callable.url`) was skipping header injection on
-    // Vercel's Node.js runtime where `.url` may be absent on the function
-    // object, causing every authenticated call to fail with auth/required.
+    // Always inject the x-id-token header regardless of runtime/preset.
     const callable = fn as ServerFnCallable;
     return (await callable({ data, headers: { "x-id-token": idToken } })) as TOutput;
   }, []);
