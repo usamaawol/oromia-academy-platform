@@ -6,7 +6,13 @@
  * supplies its own role.
  */
 import { fsCreate, fsGet, fsSet, verifyIdToken } from "./fb-admin.server";
-import { ADMIN_ROLES, STAFF_ROLES, type Profile, type Role } from "./schema";
+import {
+  ADMIN_ROLES,
+  STAFF_ROLES,
+  normaliseRole,
+  type Profile,
+  type Role,
+} from "./schema";
 
 export class AppError extends Error {
   constructor(public code: string) {
@@ -44,21 +50,34 @@ export async function requireProfile(idToken: string): Promise<Profile> {
     // Activation-level suspension
     if (existing.activationStatus === "suspended") throw new AppError("auth/suspended");
 
-    // Backfill activationStatus for legacy profiles
+    // ── Role normalisation: owner / administrator / superadmin → admin ──
+    // Existing privileged accounts are safely promoted to the unified admin
+    // role so they keep access. Instructors keep their instructor role.
     let migrated = existing as Profile;
+    const normalisedRole: Role = normaliseRole(existing.role);
+    const roleChanged = normalisedRole !== (existing.role as unknown as Role);
+
+    // Backfill activationStatus for legacy profiles
+    let activationStatusChanged = false;
+    let newActivationStatus: Profile["activationStatus"] | undefined;
     if (!migrated.activationStatus) {
-      const staff: Profile["role"][] = ["owner", "admin", "instructor"];
-      const isStaff = staff.includes(migrated.role);
+      const isStaff = STAFF_ROLES.includes(normalisedRole);
       const hasCourse = (migrated.courseIds?.length ?? 0) > 0;
-      const activationStatus: Profile["activationStatus"] =
-        isStaff || hasCourse ? "active" : "pending";
+      newActivationStatus = isStaff || hasCourse ? "active" : "pending";
+      activationStatusChanged = true;
+    }
+
+    const courseIdsChanged = !migrated.courseIds;
+    const now = Date.now();
+
+    if (roleChanged || activationStatusChanged || courseIdsChanged) {
       migrated = {
         ...migrated,
+        role: normalisedRole,
         courseIds: migrated.courseIds ?? [],
-        activationStatus,
-        updatedAt: Date.now(),
+        ...(activationStatusChanged && newActivationStatus ? { activationStatus: newActivationStatus } : {}),
+        updatedAt: now,
       };
-      // Fire+forget: persist the backfilled value
       void fsSet("users", verified.uid, migrated as unknown as Record<string, unknown>).catch(
         () => undefined,
       );
@@ -69,8 +88,9 @@ export async function requireProfile(idToken: string): Promise<Profile> {
   }
 
   // Recovery path: the auth account exists but the profile write failed
-  // earlier. Recreate it as a student — never with elevated privileges.
-  // New auto-created student profiles are always pending activation.
+  // earlier. Recreate it as a student — NEVER with elevated privileges.
+  // Even if this UID was previously "owner" in a different system, the only
+  // authoritative way to become admin is via another admin's manual action.
   const now = Date.now();
   const profile: Profile = {
     id: verified.uid,

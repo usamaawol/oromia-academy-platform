@@ -8,6 +8,7 @@ import {
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
+  Clock,
   Download,
   Eye,
   FileText,
@@ -29,6 +30,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import { PageHeader } from "@/components/page-header";
 import {
   Dialog,
   DialogContent,
@@ -576,108 +578,185 @@ function ExamsPage() {
   ];
 
   return (
-    <div className="max-w-5xl">
-      {/* Header */}
-      <div className="mb-6 flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">{t("admin.exams")}</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            {exams.length} exam{exams.length !== 1 ? "s" : ""}
-          </p>
-        </div>
-        <Button size="sm" onClick={openNew} className="gap-1.5">
-          <Plus className="size-4" /> {t("admin.newExam")}
-        </Button>
-      </div>
+    <div>
+      {/* Premium PageHeader */}
+      <PageHeader
+        title={t("admin.exams")}
+        subtitle={`${exams.length} exam${exams.length !== 1 ? "s" : ""} — Create and manage timed exams, question bank, PDF import, and leaderboard controls.`}
+        icon={<GraduationCap className="size-5" strokeWidth={1.9} />}
+        action={
+          <Button size="sm" onClick={openNew} className="h-9 gap-2 font-medium">
+            <Plus className="size-4" strokeWidth={1.9} /> {t("admin.newExam")}
+          </Button>
+        }
+      />
 
-      {/* Exam list */}
+      {/* Exam list — premium */}
       {loading ? (
-        <div className="space-y-3">
-          {[0, 1, 2].map((i) => <Skeleton key={i} className="h-24 rounded-xl" />)}
+        <div className="space-y-3.5 sm:space-y-4 animate-fade-in-up">
+          {[0, 1, 2].map((i) => (
+            <Skeleton key={i} className="h-28 sm:h-24 rounded-xl" />
+          ))}
         </div>
       ) : exams.length === 0 ? (
-        <Card className="border-dashed">
-          <CardContent className="flex flex-col items-center gap-4 py-16 text-center">
-            <div className="grid size-14 place-items-center rounded-2xl bg-muted">
-              <GraduationCap className="size-7 text-muted-foreground" />
+        <Card className="border-dashed border-border/70 bg-card/60 animate-fade-in-up">
+          <CardContent className="flex flex-col items-center gap-4 py-16 px-4 sm:px-6 text-center">
+            <div
+              className={cn(
+                "grid size-14 sm:size-16 place-items-center rounded-2xl",
+                "bg-gradient-to-br from-primary/20 via-primary/10 to-transparent",
+                "ring-1 ring-primary/25 text-primary",
+              )}
+            >
+              <GraduationCap className="size-6 sm:size-7" strokeWidth={1.9} />
             </div>
             <div>
-              <p className="font-semibold">No exams yet</p>
-              <p className="text-sm text-muted-foreground mt-1">Create your first exam to get started.</p>
+              <p className="font-semibold tracking-tight text-[15px]">No exams yet</p>
+              <p className="text-sm text-muted-foreground mt-1.5 leading-relaxed">
+                Create your first exam to get started — with PDF import,
+                question bank, shuffling, and anti-cheat controls.
+              </p>
             </div>
-            <Button size="sm" onClick={openNew}><Plus className="size-4 mr-1" /> New Exam</Button>
+            <Button
+              size="sm"
+              onClick={openNew}
+              className="h-9 gap-2 font-medium mt-2"
+            >
+              <Plus className="size-4" strokeWidth={1.9} /> New Exam
+            </Button>
           </CardContent>
         </Card>
       ) : (
-        <div className="space-y-3">
-          {exams.map((exam) => (
-            <Card key={exam.id} className="border-border/60 hover:border-primary/30 transition-colors">
-              <CardContent className="p-4">
-                <div className="flex items-start gap-4">
-                  <div className="grid size-10 shrink-0 place-items-center rounded-xl bg-primary/10">
-                    <GraduationCap className="size-5 text-primary" />
+        <div className="space-y-3 sm:space-y-3.5 animate-fade-in-up">
+          {exams.map((exam, idx) => (
+            <Card
+              key={exam.id}
+              className={cn(
+                "border-border/65 bg-card hover:border-primary/35 hover:shadow-elevated",
+                "transition-all duration-220 ease-[cubic-bezier(0.22,1,0.36,1)]",
+                "overflow-hidden",
+              )}
+              style={{ animationDelay: `${idx * 30}ms` }}
+            >
+              <CardContent className="p-4 sm:p-5">
+                <div className="flex flex-col sm:flex-row sm:items-start gap-4 sm:gap-4.5">
+                  <div
+                    className={cn(
+                      "grid size-11 sm:size-12 shrink-0 place-items-center rounded-xl",
+                      "bg-gradient-to-br from-primary/20 via-primary/10 to-transparent",
+                      "ring-1 ring-primary/25 text-primary",
+                    )}
+                  >
+                    <GraduationCap className="size-5 sm:size-[22px]" strokeWidth={1.9} />
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <h3 className="font-semibold">{exam.title}</h3>
-                      <Badge variant={statusVariant(exam.status)} className="capitalize text-xs">
+                      <h3 className="font-semibold text-[14.5px] tracking-tight leading-tight">
+                        {exam.title}
+                      </h3>
+                      <Badge
+                        variant={statusVariant(exam.status)}
+                        className="capitalize text-[11px] gap-1"
+                      >
+                        {exam.status === "active" && (
+                          <span className="size-1.5 rounded-full bg-primary animate-pulse-subtle" />
+                        )}
                         {exam.status}
                       </Badge>
                       {exam.hasPassword && (
-                        <Badge variant="outline" className="text-xs gap-1">
-                          <Lock className="size-2.5" /> Password
+                        <Badge variant="secondary" className="text-[11px] gap-1.5">
+                          <Lock className="size-3" strokeWidth={2} /> Locked
                         </Badge>
                       )}
                     </div>
-                    <div className="mt-1.5 flex flex-wrap gap-3 text-xs text-muted-foreground">
-                      <span>{courseName(exam.courseId)}</span>
-                      <span>{exam.durationMin} min</span>
-                      <span>{exam.questionIds.length} questions</span>
-                      <span>{exam.maxAttempts === 0 ? "Unlimited attempts" : `${exam.maxAttempts} attempt${exam.maxAttempts !== 1 ? "s" : ""}`}</span>
-                      <span>Pass: {exam.passMark}%</span>
-                      {exam.showAnswersAfter && <span className="text-green-600">Shows answers</span>}
-                      {exam.pdfUrl && <span className="text-primary">📄 PDF attached</span>}
-                      {exam.createdAt && (
-                        <span title="Created">📅 {new Date(exam.createdAt).toLocaleDateString()}</span>
+                    <div
+                      className={cn(
+                        "mt-2 flex flex-wrap gap-x-4 gap-y-1.5 items-center",
+                        "text-[12px] text-muted-foreground",
                       )}
-                      {exam.updatedAt && exam.updatedAt !== exam.createdAt && (
-                        <span title="Last updated">🔄 {new Date(exam.updatedAt).toLocaleDateString()}</span>
+                    >
+                      <span className="flex items-center gap-1.5">
+                        <BookOpen className="size-3" strokeWidth={2} />
+                        {courseName(exam.courseId) || "No course"}
+                      </span>
+                      <span className="flex items-center gap-1.5">
+                        <Clock className="size-3" strokeWidth={2} />
+                        {exam.durationMin} min
+                      </span>
+                      <span className="flex items-center gap-1.5">
+                        <FileText className="size-3" strokeWidth={2} />
+                        {exam.questionIds.length} questions
+                      </span>
+                      <span className="flex items-center gap-1.5">
+                        <Users className="size-3" strokeWidth={2} />
+                        {exam.maxAttempts === 0
+                          ? "Unlimited"
+                          : `${exam.maxAttempts} attempt${exam.maxAttempts !== 1 ? "s" : ""}`}
+                      </span>
+                      <span className="flex items-center gap-1.5">
+                        <CheckCircle2 className="size-3 text-success" strokeWidth={2} />
+                        Pass: {exam.passMark}%
+                      </span>
+                      {exam.showAnswersAfter && (
+                        <span className="flex items-center gap-1.5 text-success">
+                          <Eye className="size-3" strokeWidth={2} />
+                          Shows answers
+                        </span>
                       )}
                     </div>
                   </div>
-                  <div className="flex gap-1 shrink-0">
-                    <Button
-                      variant="ghost" size="sm"
-                      className="gap-1.5 text-xs"
-                      onClick={() => void openLeaderboard(exam.id)}
-                    >
-                      <Users className="size-3.5" /> Board
-                    </Button>
-                    <Button
-                      variant={exam.status === "active" ? "secondary" : "default"}
-                      size="sm"
-                      className="gap-1.5 text-xs"
-                      onClick={() => void togglePublish(exam)}
-                    >
-                      {exam.status === "active" ? (
-                        <><XCircle className="size-3.5" /> Unpublish</>
-                      ) : (
-                        <><Zap className="size-3.5" /> Publish</>
-                      )}
-                    </Button>
-                    <Button
-                      variant="ghost" size="icon"
-                      title="Download exam (admin)"
-                      onClick={() => downloadExamPdf(exam, questions)}
-                    >
-                      <Download className="size-4 text-primary" />
-                    </Button>
-                    <Button variant="ghost" size="icon" onClick={() => openEdit(exam)}>
-                      <Pencil className="size-4" />
-                    </Button>
-                    <Button variant="ghost" size="icon" onClick={() => void remove(exam.id)}>
-                      <Trash2 className="size-4 text-destructive" />
-                    </Button>
+                  <div className="flex items-center gap-1 sm:gap-1.5 shrink-0 sm:flex-col sm:items-end">
+                    <div className="flex gap-1 sm:gap-1.5">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 gap-1.5 text-[11.5px] hover:bg-muted/70"
+                        onClick={() => void openLeaderboard(exam.id)}
+                      >
+                        <Users className="size-3.5" strokeWidth={1.9} />
+                        <span className="hidden sm:inline">Board</span>
+                      </Button>
+                      <Button
+                        variant={exam.status === "active" ? "secondary" : "default"}
+                        size="sm"
+                        className="h-8 gap-1.5 text-[11.5px] font-medium"
+                        onClick={() => void togglePublish(exam)}
+                      >
+                        {exam.status === "active" ? (
+                          <>
+                            <XCircle className="size-3.5" strokeWidth={1.9} />
+                            <span className="hidden sm:inline">Unpublish</span>
+                            <span className="sm:hidden">Close</span>
+                          </>
+                        ) : (
+                          <>
+                            <Zap className="size-3.5" strokeWidth={1.9} />
+                            <span className="hidden sm:inline">Publish</span>
+                            <span className="sm:hidden">Live</span>
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                    <div className="flex gap-0.5">
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        title="Download exam (admin)"
+                        onClick={() => downloadExamPdf(exam, questions)}
+                      >
+                        <Download className="size-[15px] text-primary" strokeWidth={1.9} />
+                      </Button>
+                      <Button variant="ghost" size="icon-sm" onClick={() => openEdit(exam)}>
+                        <Pencil className="size-[15px]" strokeWidth={1.9} />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        onClick={() => void remove(exam.id)}
+                      >
+                        <Trash2 className="size-[15px] text-destructive" strokeWidth={1.9} />
+                      </Button>
+                    </div>
                   </div>
                 </div>
               </CardContent>

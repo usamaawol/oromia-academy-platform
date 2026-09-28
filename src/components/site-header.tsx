@@ -1,15 +1,36 @@
 import { Link, useRouterState } from "@tanstack/react-router";
-import { GraduationCap, Languages, LogOut, Moon, Sun, Menu } from "lucide-react";
+import { Languages, LogOut, Moon, Sun, Menu, Check } from "lucide-react";
 import { useState } from "react";
 
 import { useTheme } from "@/components/theme";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useI18n, type Lang } from "@/i18n";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 
-const LANGS: Lang[] = ["om", "en", "am", "ar"];
-const LANG_LABELS: Record<Lang, string> = { om: "OM", en: "EN", am: "አማ", ar: "عر" };
+type LangMeta = {
+  code: Lang;
+  label: string;
+  nativeName: string;
+  flag: string;
+};
+
+const LANGS: LangMeta[] = [
+  { code: "om", label: "OM", nativeName: "Afaan Oromoo", flag: "🇪🇹" },
+  { code: "en", label: "EN", nativeName: "English", flag: "🇬🇧" },
+  { code: "am", label: "አማ", nativeName: "አማርኛ", flag: "🇪🇹" },
+  { code: "ar", label: "عر", nativeName: "العربية", flag: "🇸🇦" },
+];
+
+const getLangMeta = (code: Lang): LangMeta => {
+  return LANGS.find((l) => l.code === code) ?? LANGS[0]!;
+};
 
 export function SiteHeader() {
   const { t, lang, setLang } = useI18n();
@@ -59,18 +80,41 @@ export function SiteHeader() {
           </nav>
 
           <div className="ml-auto flex items-center gap-1">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                const idx = LANGS.indexOf(lang);
-                setLang(LANGS[(idx + 1) % LANGS.length]!);
-              }}
-              aria-label={t("common.language")}
-            >
-              <Languages className="size-4" />
-              <span className="ml-1 text-xs font-semibold uppercase">{LANG_LABELS[lang]}</span>
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  aria-label={t("common.language")}
+                  className="gap-1.5"
+                >
+                  <span className="text-base leading-none">{getLangMeta(lang).flag}</span>
+                  <Languages className="size-4" />
+                  <span className="text-xs font-semibold uppercase tracking-wider">
+                    {getLangMeta(lang).label}
+                  </span>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="min-w-[200px] p-1">
+                {LANGS.map((l) => (
+                  <DropdownMenuItem
+                    key={l.code}
+                    onClick={() => setLang(l.code)}
+                    className="gap-3 px-2.5 py-2 cursor-pointer"
+                  >
+                    <span className="text-xl leading-none flex-shrink-0">{l.flag}</span>
+                    <div className="flex flex-col flex-1 min-w-0">
+                      <span className="font-medium text-sm leading-tight">{l.nativeName}</span>
+                      <span className="text-[11px] text-muted-foreground uppercase tracking-wider leading-tight">
+                        {l.label}
+                      </span>
+                    </div>
+                    {lang === l.code && <Check className="size-4 text-primary flex-shrink-0" />}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+
             <Button variant="ghost" size="icon" onClick={toggle} aria-label={t("common.theme")}>
               {theme === "dark" ? <Sun className="size-4" /> : <Moon className="size-4" />}
             </Button>

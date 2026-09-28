@@ -90,16 +90,30 @@ function AuthPage() {
   }, []);
 
   useEffect(() => {
-    if (!loading && user) {
-      const target = isStaff ? "/admin" : (profile?.activationStatus === "active" ? "/dashboard" : "/waiting-for-approval");
-      void navigate({ to: target as "/admin" | "/dashboard" | "/waiting-for-approval" });
+    if (loading) return;
+    if (!user) return;
+    // Staff → Admin Portal
+    if (isStaff) {
+      void navigate({ to: "/admin", replace: true });
+      return;
     }
+    // Student routing by activation status
+    if (profile?.activationStatus === "active") {
+      void navigate({ to: "/dashboard", replace: true });
+      return;
+    }
+    // pending / approved / rejected / suspended / expired → waiting page
+    void navigate({ to: "/waiting-for-approval", replace: true });
   }, [user, profile, isStaff, loading, navigate]);
 
   function postAuthRedirect() {
-    if (isStaff) return navigate({ to: "/admin" });
-    if (profile?.activationStatus === "active") return navigate({ to: "/dashboard" });
-    return navigate({ to: "/waiting-for-approval" });
+    if (isStaff) {
+      return navigate({ to: "/admin", replace: true });
+    }
+    if (profile?.activationStatus === "active") {
+      return navigate({ to: "/dashboard", replace: true });
+    }
+    return navigate({ to: "/waiting-for-approval", replace: true });
   }
 
   async function google() {

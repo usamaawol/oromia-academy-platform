@@ -37,7 +37,9 @@ import type {
   Enrollment,
   EnrollmentStatus,
   PaymentStatus,
+  Role,
 } from "./schema";
+import { normaliseRole, STAFF_ROLES, ADMIN_ROLES } from "./schema";
 import type { UserProfile } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -133,7 +135,7 @@ export const startExam = createServerFn({ method: "POST" })
 
     // Activation + enrollment gate
     // Staff bypass this check (they can preview exams).
-    const staff: Profile["role"][] = ["owner", "admin", "instructor"];
+    const staff: Profile["role"][] = ["admin", "instructor"];
     if (!staff.includes(profile.role)) {
       // 1. Account must be activated (pending -> /activate first)
       if (profile.activationStatus !== "active")
@@ -644,13 +646,28 @@ export const adminListStudents = createServerFn({ method: "GET" }).handler(
   async (): Promise<Profile[]> => {
     const idToken = getToken();
     await requireStaff(idToken);
-    return fsList<Profile>("users");
+    const list = await fsList<Profile>("users");
+    const now = Date.now();
+    // Apply role normalisation at read time so existing owner / administrator
+    // accounts are consistently treated as "admin" across the admin UI.
+    // Persist the normalised role back when a legacy value is found.
+    return Promise.all(
+      list.map(async (raw) => {
+        const normalised = normaliseRole(raw.role);
+        if (normalised !== (raw.role as unknown as Role)) {
+          const updated = { ...(raw as unknown as Record<string, unknown>), role: normalised, updatedAt: now };
+          void fsSet("users", raw.id, updated).catch(() => undefined);
+          return updated as unknown as Profile;
+        }
+        return raw;
+      }),
+    );
   },
 );
 
 export const adminSetRole = createServerFn({ method: "POST" })
   .validator(
-    z.object({ userId: z.string(), role: z.enum(["owner", "admin", "instructor", "student"]) }),
+    z.object({ userId: z.string(), role: z.enum(["admin", "instructor", "student"]) }),
   )
   .handler(async ({ data }): Promise<void> => {
     const idToken = getToken();
@@ -894,10 +911,7 @@ export const availableExams = createServerFn({ method: "GET" }).handler(
     );
     // Staff see every open exam; students only see exams for courses they are
     // actively enrolled in.
-    const isStaff =
-      profile.role === "owner" ||
-      profile.role === "admin" ||
-      profile.role === "instructor";
+    const isStaff = STAFF_ROLES.includes(profile.role);
     if (isStaff) return opened;
 
     // Student filter: active enrollment per exam.courseId.
@@ -1007,31 +1021,37 @@ export const updateMyProfile = createServerFn({ method: "POST" })
 // ---------------------------------------------------------------------------
 // AUTH — setup owner account (one-time setup)
 // ---------------------------------------------------------------------------
+//
+// NOTE: The role stored in Firestore is still called `admin` for clarity. The
+// "owner" function names are kept for API compatibility but they all grant the
+// same effective privilege level. An "admin" = "owner" = administrator of the academy.
 
 export const getOwnerStatus = createServerFn({ method: "GET" }).handler(
   async (): Promise<{ hasOwner: boolean }> => {
     const idToken = getToken();
     await requireProfile(idToken);
     const users = await fsList<Profile>("users");
-    return { hasOwner: users.some((u) => u.role === "owner") };
+    // Recognise both legacy "owner" and new "admin" as having admin privileges.
+    return { hasOwner: users.some((u) => ADMIN_ROLES.includes(normaliseRole(u.role))) };
   },
 );
 
 /**
- * Bootstraps the academy owner. Lets the first signed-in account on a fresh
- * database claim the `owner` role so the admin panel can be reached. Server
- * enforces that an owner does not already exist.
+ * Bootstraps the academy admin. Lets the first signed-in account on a fresh
+ * database claim the admin role so the admin panel can be reached. Server
+ * enforces that an admin does not already exist.
  */
 export const claimOwner = createServerFn({ method: "POST" }).handler(
   async (): Promise<{ success: boolean }> => {
     const idToken = getToken();
     const profile = await requireProfile(idToken);
     const users = await fsList<Profile>("users");
-    if (users.some((u) => u.role === "owner")) {
+    const existing = users.find((u) => ADMIN_ROLES.includes(normaliseRole(u.role)));
+    if (existing) {
       throw new AppError("auth/owner-exists");
     }
-    await fsSet("users", profile.id, { role: "owner", updatedAt: Date.now() });
-    await logAudit(profile, "user.role", profile.id, "owner");
+    await fsSet("users", profile.id, { role: "admin", updatedAt: Date.now() });
+    await logAudit(profile, "user.role", profile.id, "admin");
     return { success: true };
   },
 );
@@ -1045,8 +1065,8 @@ export const setupOwnerAccount = createServerFn({ method: "POST" })
   )
   .handler(async ({ data }): Promise<{ success: boolean }> => {
     const users = await fsList<Profile>("users");
-    const existingOwner = users.find((u) => u.role === "owner");
-    if (existingOwner) {
+    const existingAdmin = users.find((u) => ADMIN_ROLES.includes(normaliseRole(u.role)));
+    if (existingAdmin) {
       throw new AppError("auth/owner-exists");
     }
 
@@ -1056,8 +1076,9 @@ export const setupOwnerAccount = createServerFn({ method: "POST" })
       throw new AppError("auth/user-not-found");
     }
 
-    // Set role to owner
-    await fsSet("users", user.id, { role: "owner", updatedAt: Date.now() });
+    // Set role to admin
+    await fsSet("users", user.id, { role: "admin", updatedAt: Date.now() });
+    await logAudit(user, "user.role", user.id, "admin (bootstrap");
     return { success: true };
   });
 
@@ -1126,9 +1147,7 @@ export const getRankings = createServerFn({ method: "GET" }).handler(async () =>
   const rankingsPublished = settingsDoc?.rankingsPublished ?? false;
 
   const isStaff =
-    profile.role === "owner" || profile.role === "admin" || profile.role === "instructor";
-
-  // Calculate scores per student
+    profile.role === "admin" || profile.role === "instructor";
   const studentScores = students.map((student) => {
     const studentAttempts = submitted.filter((a) => a.studentId === student.id);
     const totalScore = studentAttempts.reduce((sum, a) => sum + (a.percentage ?? 0), 0);
@@ -1853,7 +1872,7 @@ async function hasActiveEnrollment(
   courseId: string | null | undefined,
 ): Promise<boolean> {
   const isStaff =
-    profile.role === "owner" || profile.role === "admin" || profile.role === "instructor";
+    profile.role === "admin" || profile.role === "instructor";
   if (isStaff) return true;
   if (!courseId) return true; // no course restriction specified
 

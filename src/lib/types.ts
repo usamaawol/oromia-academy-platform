@@ -1,4 +1,25 @@
-export type Role = "owner" | "admin" | "instructor" | "student";
+export type Role = "admin" | "instructor" | "student";
+/**
+ * Normalise any legacy role string into the simplified two-tier model.
+ *
+ *  - owner / administrator / superadmin → admin
+ *  - instructor                      → instructor (preserved for future use)
+ *  - anything else                   → student (safe default)
+ */
+export function normaliseRole(raw: string | null | undefined): Role {
+  if (!raw) return "student";
+  switch (raw) {
+    case "owner":
+    case "admin":
+    case "administrator":
+    case "superadmin":
+      return "admin";
+    case "instructor":
+      return "instructor";
+    default:
+      return "student";
+  }
+}
 /**
  * pending   — just registered, waiting for admin approval
  * approved  — admin approved, unique activation code is visible to student

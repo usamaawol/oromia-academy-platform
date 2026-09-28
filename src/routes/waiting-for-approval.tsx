@@ -17,7 +17,7 @@
  * verifies activationStatus === "approved" + userId match server-side.
  * The browser never directly reads the activationCodeSecrets collection.
  */
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import {
   CheckCircle2,
   Clock,
@@ -29,6 +29,7 @@ import {
   Copy,
   Check,
   RefreshCw,
+  AlertCircle,
 } from "lucide-react";
 import { useEffect, useRef, useState, useCallback } from "react";
 import { toast } from "sonner";
@@ -57,12 +58,21 @@ export const Route = createFileRoute("/waiting-for-approval")({
 });
 
 type PageStatus = "loading" | "pending" | "approved" | "rejected" | "suspended" | "active";
+type ActivationStatus = "pending" | "approved" | "active" | "rejected" | "suspended" | "expired";
+type PendingCodeResult = { code: string | null; status: ActivationStatus };
+type RedeemResult = { ok: true; activationStatus: ActivationStatus; courseId: string | null };
 
 function WaitingForApprovalPage() {
-  const { lang } = useI18n();
+  const { t, lang } = useI18n();
   const { user, profile, loading, isActivated, refreshProfile } = useAuth();
   const navigate = useNavigate();
   const call = useServerFn();
+
+  // Snapshots the latest isActivated value without stale closure issues
+  const activatedRef = useRef(false);
+  useEffect(() => {
+    activatedRef.current = isActivated;
+  }, [isActivated]);
 
   const [pageStatus, setPageStatus] = useState<PageStatus>("loading");
   const [activationCode, setActivationCode] = useState<string | null>(null);
@@ -75,20 +85,38 @@ function WaitingForApprovalPage() {
   const snapshotUnsub = useRef<(() => void) | null>(null);
 
   // Fetch the raw activation code from the server (only works when approved)
-  const fetchCode = useCallback(async () => {
-    if (!user) return;
-    setFetchingCode(true);
-    try {
-      const result = await call(getMyPendingCode, undefined);
-      if (result.code) {
-        setActivationCode(result.code);
+  const fetchCode = useCallback(
+    async (attempt = 0) => {
+      if (!user) return;
+      if (attempt === 0) setFetchingCode(true);
+      try {
+        const result = (await call(getMyPendingCode, undefined)) as PendingCodeResult;
+        if (result.code) {
+          setActivationCode(result.code);
+          setFetchingCode(false);
+          return;
+        }
+        if (result.status === "approved" && attempt < 5) {
+          const delay = Math.min(200 * Math.pow(2, attempt), 2000);
+          setTimeout(() => {
+            void fetchCode(attempt + 1);
+          }, delay);
+          return;
+        }
+      } catch (err) {
+        console.error("Failed to fetch activation code:", err);
+        if (attempt < 3) {
+          const delay = 500 * Math.pow(2, attempt);
+          setTimeout(() => {
+            void fetchCode(attempt + 1);
+          }, delay);
+          return;
+        }
       }
-    } catch (err) {
-      console.error("Failed to fetch activation code:", err);
-    } finally {
       setFetchingCode(false);
-    }
-  }, [user, call]);
+    },
+    [user, call],
+  );
 
   // Update page state based on a given activationStatus
   const updateFromStatus = useCallback(
@@ -175,7 +203,7 @@ function WaitingForApprovalPage() {
     if (!activationCode) return;
     setActivating(true);
     try {
-      const result = await call(redeemActivationCode, { code: activationCode });
+      const result = (await call(redeemActivationCode, { code: activationCode })) as RedeemResult;
       if (result.ok) {
         setActivated(true);
         await refreshProfile();
@@ -184,17 +212,21 @@ function WaitingForApprovalPage() {
             ? "Herregni kee milkaa'inaan hojiiirra kaafame! Daashboordii kee baniisaa."
             : "Your account has been successfully activated! Opening your dashboard.",
         );
-        setTimeout(() => {
-          void navigate({ to: "/dashboard" });
-        }, 1500);
+        let tries = 0;
+        const tryNavigate = async () => {
+          tries += 1;
+          await refreshProfile();
+          if (tries >= 3 || isActivated) {
+            void navigate({ to: "/dashboard", replace: true });
+          } else {
+            setTimeout(() => void tryNavigate(), 800);
+          }
+        };
+        setTimeout(() => void tryNavigate(), 800);
       }
     } catch (err) {
-      const msg = serverErrorMessage(err, { t: (k: string) => k });
-      toast.error(
-        lang === "om"
-          ? `Dhiibbaa: ${msg}`
-          : `Activation failed: ${msg}`,
-      );
+      const msg = serverErrorMessage(err, (key, vars) => t(key, vars));
+      toast.error(lang === "om" ? `Dhiibbaa: ${msg}` : `Activation failed: ${msg}`);
     } finally {
       setActivating(false);
     }
@@ -226,11 +258,12 @@ function WaitingForApprovalPage() {
         <div className="grid size-14 place-items-center rounded-2xl bg-primary/10 shadow-inner">
           <GraduationCap className="size-8 text-primary" />
         </div>
-        <p className="text-xl font-bold tracking-tight">{lang === "om" ? "Oromia Academy" : "Oromia Academy"}</p>
+        <p className="text-xl font-bold tracking-tight">
+          {lang === "om" ? "Oromia Academy" : "Oromia Academy"}
+        </p>
       </div>
 
       <div className="w-full max-w-md rounded-2xl border border-border/60 bg-card p-8 shadow-soft">
-
         {/* ───── PENDING ───── */}
         {pageStatus === "pending" && (
           <div className="flex flex-col items-center gap-6 text-center">
@@ -319,9 +352,11 @@ function WaitingForApprovalPage() {
                       onClick={() => void handleCopy()}
                       title={lang === "om" ? "Garagalchi" : "Copy"}
                     >
-                      {copied
-                        ? <Check className="size-4 text-emerald-500" />
-                        : <Copy className="size-4 text-muted-foreground" />}
+                      {copied ? (
+                        <Check className="size-4 text-emerald-500" />
+                      ) : (
+                        <Copy className="size-4 text-muted-foreground" />
+                      )}
                     </Button>
                   </div>
                   <p className="mt-2 text-xs text-muted-foreground">
@@ -335,7 +370,9 @@ function WaitingForApprovalPage() {
                   <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400">
                     <CheckCircle2 className="size-5" />
                     <span className="font-semibold">
-                      {lang === "om" ? "Milkaa'eera! Daashboordii banaa..." : "Activated! Opening dashboard..."}
+                      {lang === "om"
+                        ? "Milkaa'eera! Daashboordii banaa..."
+                        : "Activated! Opening dashboard..."}
                     </span>
                   </div>
                 ) : (
@@ -345,27 +382,45 @@ function WaitingForApprovalPage() {
                     onClick={() => void handleActivate()}
                     disabled={activating}
                   >
-                    {activating
-                      ? <><Loader2 className="size-4 animate-spin" />{lang === "om" ? "Hojiirraa kaafamaa..." : "Activating..."}</>
-                      : <><KeyRound className="size-4" />{lang === "om" ? "Herrega Hojiirraa Kaasi" : "Activate My Account"}</>
-                    }
+                    {activating ? (
+                      <>
+                        <Loader2 className="size-4 animate-spin" />
+                        {lang === "om" ? "Hojiirraa kaafamaa..." : "Activating..."}
+                      </>
+                    ) : (
+                      <>
+                        <KeyRound className="size-4" />
+                        {lang === "om" ? "Herrega Hojiirraa Kaasi" : "Activate My Account"}
+                      </>
+                    )}
                   </Button>
                 )}
               </>
             ) : (
-              <div className="flex flex-col items-center gap-3">
-                <p className="text-sm text-muted-foreground">
-                  {lang === "om" ? "Koodiin argamuu dadhabde." : "Could not load your code."}
-                </p>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => void fetchCode()}
-                  className="gap-2"
-                >
-                  <RefreshCw className="size-3.5" />
-                  {lang === "om" ? "Irra Deebi'i Yaalii" : "Try Again"}
-                </Button>
+              <div className="flex flex-col items-center gap-3 w-full">
+                <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm dark:border-amber-800 dark:bg-amber-900/20">
+                  <AlertCircle className="size-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                  <span className="text-amber-800 dark:text-amber-300">
+                    {lang === "om" ? "Koodiin argamuu dadhabde." : "Could not load your code."}
+                  </span>
+                </div>
+                <div className="flex flex-col sm:flex-row gap-2 w-full">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void fetchCode()}
+                    className="gap-2 flex-1"
+                  >
+                    <RefreshCw className="size-3.5" />
+                    {lang === "om" ? "Irra Deebi'i Yaalii" : "Try Again"}
+                  </Button>
+                  <Button asChild size="sm" className="gap-2 flex-1">
+                    <Link to="/activate">
+                      <KeyRound className="size-3.5" />
+                      {lang === "om" ? "Koodii Galchi" : "Enter Code Manually"}
+                    </Link>
+                  </Button>
+                </div>
               </div>
             )}
           </div>
@@ -443,9 +498,7 @@ function WaitingForApprovalPage() {
         )}
       </div>
 
-      <p className="mt-6 text-xs text-muted-foreground">
-        © 2026 Oromia Academy
-      </p>
+      <p className="mt-6 text-xs text-muted-foreground">© 2026 Oromia Academy</p>
     </div>
   );
 }

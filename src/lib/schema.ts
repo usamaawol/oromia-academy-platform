@@ -5,10 +5,30 @@
  * only ever receive `PublicQuestion`.
  */
 
-export type Role = "owner" | "admin" | "instructor" | "student";
+export type Role = "admin" | "instructor" | "student";
 
-export const STAFF_ROLES: Role[] = ["owner", "admin", "instructor"];
-export const ADMIN_ROLES: Role[] = ["owner", "admin"];
+export const STAFF_ROLES: Role[] = ["admin", "instructor"];
+export const ADMIN_ROLES: Role[] = ["admin"];
+
+/**
+ * Normalise any legacy role string into the simplified role set.
+ * Existing owner / administrator / superadmin accounts are safely treated as
+ * `admin` so no one loses access during the migration.
+ */
+export function normaliseRole(raw: string | null | undefined): Role {
+  if (!raw) return "student";
+  switch (raw) {
+    case "owner":
+    case "admin":
+    case "administrator":
+    case "superadmin":
+      return "admin";
+    case "instructor":
+      return "instructor";
+    default:
+      return "student";
+  }
+}
 
 /**
  * pending   — just registered, waiting for admin approval
