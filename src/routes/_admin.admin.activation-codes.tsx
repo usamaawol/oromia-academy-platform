@@ -58,6 +58,7 @@ import { useServerFn } from "@/hooks/use-server-fn";
 import {
   adminListActivationCodes,
   adminRevokeActivationCode,
+  adminDeleteActivationCode,
   generateActivationCodes,
   adminListCourses,
   adminListStudents,
@@ -230,6 +231,9 @@ function ActivationCodesPage() {
 
   // Revoke confirmation
   const [revoking, setRevoking] = useState<string | null>(null);
+  // Delete confirmation
+  const [deleting, setDeleting] = useState<string | null>(null);
+  const [deleteInProgress, setDeleteInProgress] = useState(false);
 
   async function refresh() {
     setLoading(true);
@@ -308,6 +312,21 @@ function ActivationCodesPage() {
       await refresh();
     } catch (err) {
       toast.error(serverErrorMessage(err, t));
+    }
+  }
+
+  async function handleDelete(id: string) {
+    setDeleteInProgress(true);
+    try {
+      await call(adminDeleteActivationCode, { id });
+      toast.success("Koodiin balleeffame.");
+      setDeleting(null);
+      // Optimistic UI — remove from local state immediately
+      setCodes((prev) => prev.filter((c) => c.id !== id));
+    } catch (err) {
+      toast.error(serverErrorMessage(err, t));
+    } finally {
+      setDeleteInProgress(false);
     }
   }
 
@@ -731,9 +750,24 @@ function ActivationCodesPage() {
                               Haqi
                             </Button>
                           )}
-                          {code.status !== "available" && (
+                          {/* Delete button — available for all non-used codes */}
+                          {code.status !== "used" && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className={cn(
+                                "h-8 w-8 p-0",
+                                "text-muted-foreground/60 hover:text-destructive hover:bg-destructive/[0.08]",
+                              )}
+                              title="Balleessi (permanently delete)"
+                              onClick={() => setDeleting(code.id)}
+                            >
+                              <Trash2 className="size-3.5" strokeWidth={1.9} />
+                            </Button>
+                          )}
+                          {code.status === "used" && (
                             <span className="text-[11px] text-muted-foreground/50 italic pr-1">
-                              No action
+                              Protected
                             </span>
                           )}
                         </div>
@@ -1015,6 +1049,66 @@ function ActivationCodesPage() {
             >
               <ShieldOff className="size-4" strokeWidth={1.9} />
               Eeyyee, Haqi
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ==================== DELETE CONFIRM ==================== */}
+      <Dialog open={!!deleting} onOpenChange={(v) => { if (!v) setDeleting(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader className="gap-3">
+            <div className="flex items-start gap-3">
+              <div className={cn(
+                "size-11 shrink-0 grid place-items-center rounded-xl",
+                "bg-destructive/[0.10] ring-1 ring-destructive/25 text-destructive",
+              )}>
+                <Trash2 className="size-5" strokeWidth={1.9} />
+              </div>
+              <div className="pt-0.5 min-w-0">
+                <DialogTitle className="text-[16px] font-bold tracking-tight">
+                  Koodii Balleessi
+                </DialogTitle>
+                <DialogDescription className="text-[13px] mt-1 leading-snug">
+                  Koodiin kun dhaabbatamaan ni balleeffama. Kun deebi'uu hin danda'u.
+                </DialogDescription>
+              </div>
+            </div>
+          </DialogHeader>
+
+          {/* Safety note */}
+          <div className="rounded-xl border border-destructive/20 bg-destructive/[0.06] p-3">
+            <p className="text-[12px] text-destructive leading-relaxed">
+              ⚠️ Koodiin fayyadamame (Used) balleeffamuu hin danda'u — seenaa activation eeguuf. Koodiileen banaa, haqamee, fi darbeera kan balleeffamu.
+            </p>
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setDeleting(null)}
+              className="h-10 font-medium"
+              disabled={deleteInProgress}
+            >
+              Haquu
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => deleting && void handleDelete(deleting)}
+              disabled={deleteInProgress}
+              className="h-10 gap-2 font-medium"
+            >
+              {deleteInProgress ? (
+                <>
+                  <RefreshCw className="size-4 animate-spin" strokeWidth={1.9} />
+                  Balleeffamaa...
+                </>
+              ) : (
+                <>
+                  <Trash2 className="size-4" strokeWidth={1.9} />
+                  Eeyyee, Balleessi
+                </>
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>

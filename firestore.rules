@@ -183,8 +183,9 @@ service cloud.firestore {
       allow create: if isAdmin();
       // Code update only by admin (mark used, revoke, etc.) — via server fn
       allow update: if isAdmin();
-      // Hard-delete forbidden — revoke instead (audit trail preserved)
-      allow delete: if false;
+      // Admin can hard-delete non-used codes via the server function.
+      // Used codes are protected server-side (adminDeleteActivationCode throws).
+      allow delete: if isAdmin();
     }
 
     // ==================== ENROLLMENTS COLLECTION ====================
@@ -218,8 +219,8 @@ service cloud.firestore {
     match /activationCodeSecrets/{codeId} {
       // Only admin/owner can read/write these secrets via the server.
       allow get, list, create, update: if isAdmin();
-      // Hard-delete forbidden — codes stay for audit.
-      allow delete: if false;
+      // Admin can delete secrets when the parent activation code is deleted.
+      allow delete: if isAdmin();
     }
 
     // ==================== NOTIFICATIONS COLLECTION ====================

@@ -1726,10 +1726,10 @@ export const adminListActivationCodes = createServerFn({ method: "GET" })
       const course = c.courseId ? courseById.get(c.courseId) : undefined;
       out.push({
         ...c,
-        usedByUserName: usedBy ? usedBy.fullName : undefined,
-        assignedUserName: assigned ? assigned.fullName : undefined,
-        courseTitleOm: course?.titleOm,
-        courseTitleEn: course?.titleEn,
+        ...(usedBy ? { usedByUserName: usedBy.fullName } : {}),
+        ...(assigned ? { assignedUserName: assigned.fullName } : {}),
+        ...(course?.titleOm ? { courseTitleOm: course.titleOm } : {}),
+        ...(course?.titleEn ? { courseTitleEn: course.titleEn } : {}),
       });
     }
     out.sort((a, b) => b.createdAt - a.createdAt);
@@ -1754,6 +1754,28 @@ export const adminRevokeActivationCode = createServerFn({ method: "POST" })
       updatedAt: now,
     });
     await logAudit(actor, "activationCodes.revoke", data.id);
+  });
+
+// ---------- admin: permanently delete an activation code ----------
+// Only admin can do this. Used codes cannot be deleted to preserve audit trail.
+// The related activationCodeSecrets document is also cleaned up when present.
+
+export const adminDeleteActivationCode = createServerFn({ method: "POST" })
+  .validator(z.object({ id: z.string() }))
+  .handler(async ({ data }): Promise<void> => {
+    const idToken = getToken();
+    const actor = await requireAdmin(idToken);
+    const existing = await fsGet<ActivationCode>("activationCodes", data.id);
+    if (!existing) throw new AppError("activation/not-found");
+    // Prevent deletion of used codes — they form part of the activation audit trail
+    if (existing.status === "used") {
+      throw new AppError("activation/code-used");
+    }
+    // Hard-delete the code document
+    await fsDelete("activationCodes", data.id);
+    // Best-effort: also delete the associated secret (may not exist for manually-assigned codes)
+    await fsDelete("activationCodeSecrets", data.id).catch(() => undefined);
+    await logAudit(actor, "activationCodes.delete", data.id, `last4=${existing.codeLast4}`);
   });
 
 // ---------- admin: manually activate a student + optional course enrollments ----------
