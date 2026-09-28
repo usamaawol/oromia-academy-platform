@@ -384,8 +384,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const activationStatus: AuthCtx["activationStatus"] = profile?.activationStatus ?? undefined;
   const isStaffComputed = profile?.role === "admin" || profile?.role === "instructor";
+  // A student is considered "activated" (allowed into the student portal) when:
+  //   - They are staff (admin/instructor) — always allowed
+  //   - activationStatus === "active" — fully activated via code redemption
+  //   - activationStatus === "approved" — admin approved them; treat as activated
+  //     so they can access the portal directly without a separate code step.
+  //     The activation code flow is optional UX; the authoritative gate is
+  //     admin approval stored in Firestore.
   const isActivated =
-    isStaffComputed || profile?.activationStatus === "active";
+    isStaffComputed ||
+    profile?.activationStatus === "active" ||
+    profile?.activationStatus === "approved";
 
   // Route guards treat "auth OR profile still loading" as the "do not redirect yet"
   // state; this alias keeps the external `loading` API simple for existing call sites

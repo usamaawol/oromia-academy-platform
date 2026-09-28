@@ -98,11 +98,12 @@ function AuthPage() {
       return;
     }
     // Student routing by activation status
-    if (profile?.activationStatus === "active") {
+    // Both "active" (code redeemed) and "approved" (admin approved) get the portal
+    if (profile?.activationStatus === "active" || profile?.activationStatus === "approved") {
       void navigate({ to: "/dashboard", replace: true });
       return;
     }
-    // pending / approved / rejected / suspended / expired → waiting page
+    // pending / rejected / suspended / expired → waiting page
     void navigate({ to: "/waiting-for-approval", replace: true });
   }, [user, profile, isStaff, loading, navigate]);
 
@@ -110,7 +111,7 @@ function AuthPage() {
     if (isStaff) {
       return navigate({ to: "/admin", replace: true });
     }
-    if (profile?.activationStatus === "active") {
+    if (profile?.activationStatus === "active" || profile?.activationStatus === "approved") {
       return navigate({ to: "/dashboard", replace: true });
     }
     return navigate({ to: "/waiting-for-approval", replace: true });
