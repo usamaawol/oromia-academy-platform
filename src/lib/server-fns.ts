@@ -39,7 +39,7 @@ import type {
   PaymentStatus,
   Role,
 } from "./schema";
-import { normaliseRole, STAFF_ROLES, ADMIN_ROLES } from "./schema";
+import { normaliseRole, ADMIN_ROLES } from "./schema";
 import type { UserProfile } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -133,16 +133,14 @@ export const startExam = createServerFn({ method: "POST" })
     const win = examWindowState(exam as Exam, now);
     if (win !== "open") throw new AppError("exam/not-open");
 
-    // Activation + enrollment gate
-    // Staff bypass this check (they can preview exams).
+    // Activation gate only — published exams are visible/startable for every
+    // portal student. Course enrollment is optional and never required.
     const staff: Profile["role"][] = ["admin", "instructor"];
     if (!staff.includes(profile.role)) {
-      // 1. Account must be activated (pending -> /activate first)
-      if (profile.activationStatus !== "active")
+      const status = profile.activationStatus;
+      if (status !== "active" && status !== "approved") {
         throw new AppError("activation/activation-required");
-      // 2. Must have an active, paid, non-expired enrollment for this course
-      if (!(await hasActiveEnrollment(profile, exam.courseId)))
-        throw new AppError("exam/not-enrolled");
+      }
     }
 
     // Password check
@@ -903,21 +901,14 @@ export const myAttempts = createServerFn({ method: "GET" }).handler(
 export const availableExams = createServerFn({ method: "GET" }).handler(
   async (): Promise<Exam[]> => {
     const idToken = getToken();
-    const profile = await requireProfile(idToken);
+    await requireProfile(idToken);
     const all = await fsQuery<Exam>("exams", [["status", "EQUAL", "active"]]);
     const now = Date.now();
-    const opened = all.filter(
+    // Published (status=active) exams are visible to every signed-in student —
+    // no course enrollment or department filter.
+    return all.filter(
       (e) => examWindowState(e, now) === "open" || e.status === "active",
     );
-    // Staff see every open exam; students see exams they are allowed to take.
-    const isStaff = STAFF_ROLES.includes(profile.role);
-    if (isStaff) return opened;
-
-    const { affiliated, unrestricted } = await studentCourseAccess(profile, now);
-    // Portal access without a course binding (approved/active after admin
-    // approval, optional activation code): show every active exam.
-    if (unrestricted) return opened;
-    return opened.filter((e) => !e.courseId || affiliated.has(e.courseId));
   },
 );
 
@@ -1932,72 +1923,6 @@ export const getMyEnrollments = createServerFn({ method: "GET" }).handler(
     return all;
   },
 );
-
-// ===========================================================================
-// PROTECT availableExams + startExam USING ENROLLMENTS
-// ===========================================================================
-
-/**
- * Resolve which courses a student can access.
- * - `affiliated`: active paid enrollments + legacy courseIds / enrolledCourseIds
- * - `unrestricted`: portal-access student with no course bindings (approved
- *   without a course-linked activation code) — may see all published exams
- */
-async function studentCourseAccess(
-  profile: Profile,
-  now = Date.now(),
-): Promise<{ affiliated: Set<string>; unrestricted: boolean }> {
-  const affiliated = new Set<string>();
-  for (const id of profile.courseIds ?? []) {
-    if (id) affiliated.add(id);
-  }
-  const enrolled = (profile as Profile & { enrolledCourseIds?: string[] })
-    .enrolledCourseIds;
-  for (const id of enrolled ?? []) {
-    if (id) affiliated.add(id);
-  }
-
-  try {
-    const myEnrollments = await fsQuery<Enrollment>("enrollments", [
-      ["userId", "EQUAL", profile.id],
-    ]);
-    for (const e of myEnrollments) {
-      if (
-        e.status === "active" &&
-        e.paymentStatus === "paid" &&
-        (!e.expiresAt || e.expiresAt >= now)
-      ) {
-        affiliated.add(e.courseId);
-      }
-    }
-  } catch {
-    // Enrollment list can fail under strict rules; fall back to profile fields.
-  }
-
-  const portalOk =
-    profile.activationStatus === "active" ||
-    profile.activationStatus === "approved";
-  return { affiliated, unrestricted: portalOk && affiliated.size === 0 };
-}
-
-/**
- * Return true if `profile` has an active, paid, non-expired enrollment for
- * `courseId`. Staff users are treated as enrolled in every course.
- */
-async function hasActiveEnrollment(
-  profile: Profile,
-  courseId: string | null | undefined,
-): Promise<boolean> {
-  const isStaff =
-    profile.role === "admin" || profile.role === "instructor";
-  if (isStaff) return true;
-  if (!courseId) return true; // no course restriction specified
-
-  const { affiliated, unrestricted } = await studentCourseAccess(profile);
-  if (unrestricted) return true;
-  return affiliated.has(courseId);
-}
-
 
 // ===========================================================================
 // ADMIN APPROVAL FLOW

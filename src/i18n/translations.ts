@@ -364,7 +364,7 @@ export const om = {
   "auth.department": "Damee",
   "auth.selectDepartment": "Damee Filadhu",
   "auth.departmentRequired": "Maaloo damee kee filadhu.",
-  "auth.emailNote": "Maqaa, imeelii fi damee kee galchi.",
+  "auth.emailNote": "Maqaa fi imeelii kee galchi. Damee fi koorsii filannoo dha.",
   "auth.registrationFailed":
     "Galmaa'iinsi immoo hin xumuramne — Firebase sirriitti qindaa'ee jiraachuu isaa mirkaneessi.",
   "auth.ownerSetupTitle": "Abbaa (Owner) academy ni uumta?",
@@ -733,7 +733,7 @@ export const en: Record<TranslationKey, string> = {
   "auth.department": "Department",
   "auth.selectDepartment": "Select your department",
   "auth.departmentRequired": "Please choose your department.",
-  "auth.emailNote": "Enter your name, email and department.",
+  "auth.emailNote": "Enter your name and email. Department and course are optional.",
   "auth.registrationFailed":
     "Registration couldn't be completed — make sure Firebase is configured and your account was created.",
   "auth.ownerSetupTitle": "Bootstrap the academy owner?",

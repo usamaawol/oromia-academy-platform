@@ -139,10 +139,6 @@ function AuthPage() {
         toast.success(t("common.success"));
         await postAuthRedirect();
       } else if (mode === "register") {
-        if (!department) {
-          toast.error(t("auth.departmentRequired"));
-          return;
-        }
         if (password !== confirm) {
           toast.error(t("auth.passwordMismatch"));
           return;
@@ -151,7 +147,7 @@ function AuthPage() {
           fullName,
           email,
           password,
-          department,
+          ...(department ? { department } : {}),
           ...(phone ? { phone } : {}),
           ...(courseId ? { courseId } : {}),
         });
@@ -269,7 +265,12 @@ function AuthPage() {
                 {mode === "register" && (
                   <>
                     <div className="grid gap-2">
-                      <Label>{t("auth.department")}</Label>
+                      <Label>
+                        {t("auth.department")}{" "}
+                        <span className="text-xs text-muted-foreground">
+                          ({t("common.optional")})
+                        </span>
+                      </Label>
                       <Select value={department} onValueChange={setDepartment}>
                         <SelectTrigger>
                           <SelectValue placeholder={t("auth.selectDepartment")} />

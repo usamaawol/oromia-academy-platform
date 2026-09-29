@@ -225,8 +225,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           role: "student",
           status: "active",
           activationStatus: "pending",
-          enrolledCourseIds: [],
-          courseIds: [],
+          enrolledCourseIds: input.courseId ? [input.courseId] : [],
+          courseIds: input.courseId ? [input.courseId] : [],
           createdAt: now,
           updatedAt: now,
         };
@@ -258,8 +258,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         role: "student",
         status: "active",
         activationStatus: "pending",
-        enrolledCourseIds: [],
-        courseIds: [],
+        enrolledCourseIds: input.courseId ? [input.courseId] : [],
+        courseIds: input.courseId ? [input.courseId] : [],
         createdAt: now,
         updatedAt: now,
       };
