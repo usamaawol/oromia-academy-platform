@@ -136,20 +136,31 @@ function DashboardPage() {
           }
         }
 
-        const [e, a, n, rRaw] = await Promise.all([
+        // Load exams/attempts first and independently — rankings must not
+        // wipe Available exams when it hits a Firestore permission error.
+        const [e, a] = await Promise.all([
           call(availableExams, undefined),
           call(myAttempts, undefined),
-          listNotifications(user.uid),
-          call(getRankings, undefined),
         ]);
-        const r = rRaw as RankingsResponse;
         setExams(e as Exam[]);
         setAttempts(a as Attempt[]);
-        setNotifications(n as AppNotification[]);
-        setRankings(r.all);
-        setRankingsPublished(r.rankingsPublished);
-        setMyRank(r.myRank);
-        // Load academy settings for announcements tab
+
+        try {
+          const n = await listNotifications(user.uid);
+          setNotifications(n as AppNotification[]);
+        } catch (err) {
+          console.error("notifications load failed", err);
+        }
+
+        try {
+          const r = (await call(getRankings, undefined)) as RankingsResponse;
+          setRankings(r.all);
+          setRankingsPublished(r.rankingsPublished);
+          setMyRank(r.myRank);
+        } catch (err) {
+          console.error("rankings load failed", err);
+        }
+
         try {
           const s = await getSettings();
           setSettings(s);
@@ -459,7 +470,9 @@ function DashboardPage() {
                     [
                       BookOpen,
                       t("dash.myCourses"),
-                      profile?.enrolledCourseIds?.length ?? 0,
+                      profile?.enrolledCourseIds?.length ||
+                        profile?.courseIds?.length ||
+                        0,
                       "text-blue-500",
                     ],
                     [ClipboardCheck, t("dash.availableExams"), exams.length, "text-green-500"],
@@ -844,7 +857,10 @@ function DashboardPage() {
                       <div>
                         <Label>Enrolled Courses</Label>
                         <p className="mt-1 text-sm text-muted-foreground">
-                          {profile?.enrolledCourseIds?.length ?? 0} course(s)
+                          {profile?.enrolledCourseIds?.length ||
+                            profile?.courseIds?.length ||
+                            0}{" "}
+                          course(s)
                         </p>
                       </div>
                     </div>

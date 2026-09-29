@@ -909,32 +909,15 @@ export const availableExams = createServerFn({ method: "GET" }).handler(
     const opened = all.filter(
       (e) => examWindowState(e, now) === "open" || e.status === "active",
     );
-    // Staff see every open exam; students only see exams for courses they are
-    // actively enrolled in.
+    // Staff see every open exam; students see exams they are allowed to take.
     const isStaff = STAFF_ROLES.includes(profile.role);
     if (isStaff) return opened;
 
-    // Student filter: active enrollment per exam.courseId.
-    // To keep the fn fast, batch-check only the courses present in `opened`.
-    const neededCourseIds = [...new Set(opened.map((e) => e.courseId))];
-    if (neededCourseIds.length === 0) return [];
-    const myEnrollments = await fsQuery<Enrollment>("enrollments", [
-      ["userId", "EQUAL", profile.id],
-    ]);
-    const active = new Set<string>();
-    for (const e of myEnrollments) {
-      if (
-        e.status === "active" &&
-        e.paymentStatus === "paid" &&
-        (!e.expiresAt || e.expiresAt >= now)
-      ) {
-        active.add(e.courseId);
-      }
-    }
-    // Legacy fallback: if profile.courseIds is populated and no enrollments
-    // exist yet (pre-migration data), treat profile.courseIds as enrolled.
-    const legacy = new Set<string>(profile.courseIds ?? []);
-    return opened.filter((e) => active.has(e.courseId) || legacy.has(e.courseId));
+    const { affiliated, unrestricted } = await studentCourseAccess(profile, now);
+    // Portal access without a course binding (approved/active after admin
+    // approval, optional activation code): show every active exam.
+    if (unrestricted) return opened;
+    return opened.filter((e) => !e.courseId || affiliated.has(e.courseId));
   },
 );
 
@@ -1135,31 +1118,60 @@ export const createUserProfile = createServerFn({ method: "POST" })
 export const getRankings = createServerFn({ method: "GET" }).handler(async () => {
   const idToken = getToken();
   const profile = await requireProfile(idToken);
-
-  const [attempts, users, settingsDoc] = await Promise.all([
-    fsList<Attempt>("examAttempts"),
-    fsList<Profile>("users"),
-    fsGet<AcademySettings>("settings", "academy"),
-  ]);
-
-  const submitted = attempts.filter((a) => a.status === "graded" && a.published);
-  const students = users.filter((u) => u.role === "student");
-  const rankingsPublished = settingsDoc?.rankingsPublished ?? false;
-
   const isStaff =
     profile.role === "admin" || profile.role === "instructor";
+
+  const settingsDoc = await fsGet<AcademySettings>("settings", "academy");
+  const rankingsPublished = settingsDoc?.rankingsPublished ?? false;
+
+  // /users list is staff-only under Firestore rules. In Hobby / user-token mode
+  // the server proxies as the caller, so students must NEVER fsList("users")
+  // (that 403 used to abort the whole student dashboard Promise.all).
+  const attempts = await fsList<Attempt>("examAttempts");
+  const submitted = attempts.filter((a) => a.status === "graded" && a.published);
+
+  let students: Array<{
+    id: string;
+    fullName: string;
+    email: string;
+    nickname?: string;
+  }>;
+
+  if (isStaff) {
+    const users = await fsList<Profile>("users");
+    students = users.filter((u) => u.role === "student");
+  } else {
+    // Derive participants from attempts + the signed-in profile (for nickname).
+    const byId = new Map<string, { id: string; fullName: string; email: string; nickname?: string }>();
+    byId.set(profile.id, {
+      id: profile.id,
+      fullName: profile.fullName,
+      email: profile.email,
+      ...(profile.nickname ? { nickname: profile.nickname } : {}),
+    });
+    for (const a of submitted) {
+      if (byId.has(a.studentId)) continue;
+      byId.set(a.studentId, {
+        id: a.studentId,
+        fullName: a.studentName,
+        email: "",
+        nickname: `Student${a.studentId.slice(-4).toUpperCase()}`,
+      });
+    }
+    students = [...byId.values()];
+  }
+
   const studentScores = students.map((student) => {
     const studentAttempts = submitted.filter((a) => a.studentId === student.id);
     const totalScore = studentAttempts.reduce((sum, a) => sum + (a.percentage ?? 0), 0);
     const avgScore =
       studentAttempts.length > 0 ? Math.round(totalScore / studentAttempts.length) : 0;
     const examCount = studentAttempts.length;
-    const nickname = (student as (typeof student & { nickname?: string }))?.nickname;
     return {
       id: student.id,
       fullName: student.fullName,
       email: student.email,
-      nickname: nickname ?? `Student${student.id.slice(-4).toUpperCase()}`,
+      nickname: student.nickname ?? `Student${student.id.slice(-4).toUpperCase()}`,
       avgScore,
       examCount,
       totalScore,
@@ -1276,15 +1288,31 @@ export const getExamLeaderboard = createServerFn({ method: "GET" })
   .validator(z.object({ examId: z.string() }))
   .handler(async ({ data }) => {
     const idToken = getToken();
-    await requireProfile(idToken);
+    const profile = await requireProfile(idToken);
+    const isStaff =
+      profile.role === "admin" || profile.role === "instructor";
 
-    const [attempts, users] = await Promise.all([
-      fsQuery<Attempt>("examAttempts", [["examId", "EQUAL", data.examId]]),
-      fsList<Profile>("users"),
+    const attempts = await fsQuery<Attempt>("examAttempts", [
+      ["examId", "EQUAL", data.examId],
     ]);
 
     const graded = attempts.filter((a) => a.status === "graded" && a.published);
-    const userMap = new Map(users.map((u) => [u.id, u]));
+
+    // Nicknames: staff may resolve from /users; students must not list /users.
+    const nicknameById = new Map<string, string>();
+    nicknameById.set(
+      profile.id,
+      profile.nickname ?? `Student${profile.id.slice(-4).toUpperCase()}`,
+    );
+    if (isStaff) {
+      const users = await fsList<Profile>("users");
+      for (const u of users) {
+        nicknameById.set(
+          u.id,
+          u.nickname ?? `Student${u.id.slice(-4).toUpperCase()}`,
+        );
+      }
+    }
 
     // Best attempt per student
     const bestByStudent = new Map<string, Attempt>();
@@ -1296,8 +1324,9 @@ export const getExamLeaderboard = createServerFn({ method: "GET" })
     const ranked = [...bestByStudent.values()]
       .sort((a, b) => b.percentage - a.percentage)
       .map((a, idx) => {
-        const user = userMap.get(a.studentId);
-        const nickname = user?.nickname || `Student${(idx + 1).toString().padStart(3, "0")}`;
+        const nickname =
+          nicknameById.get(a.studentId) ||
+          `Student${a.studentId.slice(-4).toUpperCase()}`;
         return {
           rank: idx + 1,
           nickname,
@@ -1514,16 +1543,39 @@ async function activateEnrollment(
     expiresAt,
     updatedAt: now,
   };
+  let enrollmentId: string;
   if (existing[0]) {
-    const id = existing[0].id;
-    await fsSet("enrollments", id, base);
-    return id;
+    enrollmentId = existing[0].id;
+    await fsSet("enrollments", enrollmentId, base);
+  } else {
+    enrollmentId = await fsCreate("enrollments", {
+      ...base,
+      createdAt: now,
+    });
   }
-  const id = await fsCreate("enrollments", {
-    ...base,
-    createdAt: now,
-  });
-  return id;
+
+  // Keep profile.courseIds + enrolledCourseIds in sync so the student
+  // dashboard "My courses" count and availableExams filter stay accurate.
+  try {
+    const user = await fsGet<Profile & { enrolledCourseIds?: string[] }>("users", userId);
+    if (user) {
+      const union = new Set<string>([
+        ...(user.courseIds ?? []),
+        ...(user.enrolledCourseIds ?? []),
+        courseId,
+      ]);
+      const ids = [...union];
+      await fsSet("users", userId, {
+        courseIds: ids,
+        enrolledCourseIds: ids,
+        updatedAt: now,
+      });
+    }
+  } catch {
+    /* profile sync is best-effort */
+  }
+
+  return enrollmentId;
 }
 
 // ---------- admin: generate N codes ----------
@@ -1886,6 +1938,49 @@ export const getMyEnrollments = createServerFn({ method: "GET" }).handler(
 // ===========================================================================
 
 /**
+ * Resolve which courses a student can access.
+ * - `affiliated`: active paid enrollments + legacy courseIds / enrolledCourseIds
+ * - `unrestricted`: portal-access student with no course bindings (approved
+ *   without a course-linked activation code) — may see all published exams
+ */
+async function studentCourseAccess(
+  profile: Profile,
+  now = Date.now(),
+): Promise<{ affiliated: Set<string>; unrestricted: boolean }> {
+  const affiliated = new Set<string>();
+  for (const id of profile.courseIds ?? []) {
+    if (id) affiliated.add(id);
+  }
+  const enrolled = (profile as Profile & { enrolledCourseIds?: string[] })
+    .enrolledCourseIds;
+  for (const id of enrolled ?? []) {
+    if (id) affiliated.add(id);
+  }
+
+  try {
+    const myEnrollments = await fsQuery<Enrollment>("enrollments", [
+      ["userId", "EQUAL", profile.id],
+    ]);
+    for (const e of myEnrollments) {
+      if (
+        e.status === "active" &&
+        e.paymentStatus === "paid" &&
+        (!e.expiresAt || e.expiresAt >= now)
+      ) {
+        affiliated.add(e.courseId);
+      }
+    }
+  } catch {
+    // Enrollment list can fail under strict rules; fall back to profile fields.
+  }
+
+  const portalOk =
+    profile.activationStatus === "active" ||
+    profile.activationStatus === "approved";
+  return { affiliated, unrestricted: portalOk && affiliated.size === 0 };
+}
+
+/**
  * Return true if `profile` has an active, paid, non-expired enrollment for
  * `courseId`. Staff users are treated as enrolled in every course.
  */
@@ -1898,17 +1993,9 @@ async function hasActiveEnrollment(
   if (isStaff) return true;
   if (!courseId) return true; // no course restriction specified
 
-  const list = await fsQuery<Enrollment>("enrollments", [
-    ["userId", "EQUAL", profile.id],
-    ["courseId", "EQUAL", courseId],
-  ]);
-  const now = Date.now();
-  return list.some(
-    (e) =>
-      e.status === "active" &&
-      e.paymentStatus === "paid" &&
-      (!e.expiresAt || e.expiresAt >= now),
-  );
+  const { affiliated, unrestricted } = await studentCourseAccess(profile);
+  if (unrestricted) return true;
+  return affiliated.has(courseId);
 }
 
 

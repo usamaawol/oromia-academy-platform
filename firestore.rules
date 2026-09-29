@@ -131,14 +131,11 @@ service cloud.firestore {
     // ==================== EXAMS COLLECTION ====================
     // Exam configurations with passwords and settings
     match /exams/{examId} {
-      // Staff manage exams; students can read basic exam metadata through the
+      // Staff manage exams; students can read active exam metadata through the
       // server (server uses caller's token → rules still evaluated as student).
       allow get: if isStaff()
-        || (signedIn() && request.resource == null
-            && resource.data.status == 'active');
-      // Staff list exams. Students only see active exams via the
-      // `availableExams` server call, which we still allow through the list
-      // rule below if the caller is signed in (server returns filtered set).
+        || (signedIn() && resource.data.status == 'active');
+      // Staff list exams. Students may list (server filters to active / enrolled).
       allow list: if isStaff() || signedIn();
       // Staff create / update exams via server (caller's own token)
       allow create, update: if isStaff();
