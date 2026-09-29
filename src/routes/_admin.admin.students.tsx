@@ -551,6 +551,12 @@ function StudentsPage() {
                         {user.department}
                       </p>
                     )}
+                    {user.desiredCourse && (
+                      <p className="text-[12px] text-muted-foreground mt-0.5 flex items-center gap-1.5">
+                        <span className="size-1 rounded-full bg-primary/50" />
+                        Course interest: {user.desiredCourse}
+                      </p>
+                    )}
                   </div>
 
                   {/* Date + meta */}
@@ -1021,6 +1027,12 @@ function StudentsPage() {
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Damee</span>
                     <span>{reviewTarget.department}</span>
+                  </div>
+                )}
+                {reviewTarget.desiredCourse && (
+                  <div className="flex justify-between gap-4">
+                    <span className="text-muted-foreground shrink-0">Barnoota</span>
+                    <span className="text-right font-medium">{reviewTarget.desiredCourse}</span>
                   </div>
                 )}
               </div>

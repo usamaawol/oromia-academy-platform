@@ -44,7 +44,7 @@ type AuthCtx = {
     password: string;
     phone?: string;
     department?: string;
-    courseId?: string;
+    desiredCourse?: string;
   }) => Promise<void>;
   login: (email: string, password: string) => Promise<void>;
   loginWithGoogle: () => Promise<void>;
@@ -222,11 +222,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           email,
           ...(input.phone ? { phone: input.phone } : {}),
           ...(input.department ? { department: input.department } : {}),
+          ...(input.desiredCourse ? { desiredCourse: input.desiredCourse } : {}),
           role: "student",
           status: "active",
           activationStatus: "pending",
-          enrolledCourseIds: input.courseId ? [input.courseId] : [],
-          courseIds: input.courseId ? [input.courseId] : [],
+          enrolledCourseIds: [],
+          courseIds: [],
           createdAt: now,
           updatedAt: now,
         };
@@ -255,11 +256,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         email: canonicalEmail,
         ...(input.phone ? { phone: input.phone } : {}),
         ...(input.department ? { department: input.department } : {}),
+        ...(input.desiredCourse ? { desiredCourse: input.desiredCourse } : {}),
         role: "student",
         status: "active",
         activationStatus: "pending",
-        enrolledCourseIds: input.courseId ? [input.courseId] : [],
-        courseIds: input.courseId ? [input.courseId] : [],
+        enrolledCourseIds: [],
+        courseIds: [],
         createdAt: now,
         updatedAt: now,
       };

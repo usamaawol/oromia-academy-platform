@@ -48,6 +48,8 @@ export type Profile = {
   phone?: string;
   department?: string;
   nickname?: string; // anonymous display name for leaderboards
+  /** Free-text course the student wants to enroll in (optional, set at registration). */
+  desiredCourse?: string;
   role: Role;
   courseIds: string[];
   /** Account-level status (for staff / suspension). */

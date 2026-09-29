@@ -95,8 +95,8 @@ service cloud.firestore {
           request.resource.data.createdAt == resource.data.createdAt &&
           request.resource.data.diff(resource.data).affectedKeys().hasOnly([
             'id', 'uid', 'email', 'fullName', 'phone', 'department', 'nickname',
-            'enrolledCourseIds', 'courseIds', 'role', 'status', 'activationStatus',
-            'createdAt', 'updatedAt'
+            'desiredCourse', 'enrolledCourseIds', 'courseIds', 'role', 'status',
+            'activationStatus', 'createdAt', 'updatedAt'
           ]))
         // Staff (via server, using caller's own token) may promote users,
         // except nobody can change their OWN role (prevents self-escalation).

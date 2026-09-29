@@ -15,11 +15,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useI18n, localized } from "@/i18n";
+import { useI18n } from "@/i18n";
 import { authErrorKey, useAuth } from "@/lib/auth";
-import { listCourses } from "@/lib/data";
 import { DEPARTMENTS } from "@/lib/departments";
-import type { Course } from "@/lib/types";
 
 export const Route = createFileRoute("/auth")({
   head: () => ({
@@ -72,22 +70,15 @@ function AuthPage() {
   const { login, register, resetPassword, loginWithGoogle, user, profile, isStaff, loading } = useAuth();
   const navigate = useNavigate();
   const [mode, setMode] = useState<Mode>("login");
-  const [courses, setCourses] = useState<Course[]>([]);
   const [busy, setBusy] = useState(false);
 
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [department, setDepartment] = useState("");
-  const [courseId, setCourseId] = useState("");
+  const [desiredCourse, setDesiredCourse] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
-
-  useEffect(() => {
-    void listCourses()
-      .then(setCourses)
-      .catch(() => undefined);
-  }, []);
 
   useEffect(() => {
     if (loading) return;
@@ -149,7 +140,7 @@ function AuthPage() {
           password,
           ...(department ? { department } : {}),
           ...(phone ? { phone } : {}),
-          ...(courseId ? { courseId } : {}),
+          ...(desiredCourse.trim() ? { desiredCourse: desiredCourse.trim() } : {}),
         });
         toast.success(t("common.success"));
         await postAuthRedirect();
@@ -294,24 +285,18 @@ function AuthPage() {
                       <Input id="phone" value={phone} onChange={(e) => setPhone(e.target.value)} />
                     </div>
                     <div className="grid gap-2">
-                      <Label>
-                        {t("auth.selectCourse")}{" "}
+                      <Label htmlFor="desiredCourse">
+                        {t("auth.desiredCourse")}{" "}
                         <span className="text-xs text-muted-foreground">
                           ({t("common.optional")})
                         </span>
                       </Label>
-                      <Select value={courseId} onValueChange={setCourseId}>
-                        <SelectTrigger>
-                          <SelectValue placeholder={t("auth.selectCourse")} />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {courses.map((c) => (
-                            <SelectItem key={c.id} value={c.id}>
-                              {localized(lang, c.titleOm, c.titleEn)}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      <Input
+                        id="desiredCourse"
+                        value={desiredCourse}
+                        onChange={(e) => setDesiredCourse(e.target.value)}
+                        placeholder={t("auth.desiredCoursePlaceholder")}
+                      />
                     </div>
                   </>
                 )}
